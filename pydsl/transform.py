@@ -11,7 +11,8 @@ from mlir.ir import *
 import mlir.dialects.transform as transform
 from mlir.dialects.transform import loop
 from mlir.dialects.transform import structured
-from mlir.dialects.transform import affine as taffine
+# DISABLED DUE TO CONFLICT
+# from mlir.dialects.transform import affine as taffine
 
 from pydsl.metafunc import CallingMetafunction
 from pydsl.type import lower_single

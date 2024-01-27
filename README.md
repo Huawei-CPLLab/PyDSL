@@ -1,6 +1,6 @@
 # Python-to-MLIR compiler
 
-# Background
+## Background
 
 This project aims to provide an interface between Python and MLIR with the following design goals:
 - Simple: The project should be easy to maintain with a thin layer of translation
@@ -14,13 +14,69 @@ Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a 
 We are motivated to create this project in-house because existing third-party tools do not meet the above requirements:
 - Nelli/mlir-python-extras does not meet the simplicity requirement. As of 01/16/2024, it contains roughly 8000 lines of code. It has only one active contributor and there is no plan to integrate the project as part of the official MLIR upstream.
 
-# Instruction for installation
+## Build Instructions
 
-## Prerequisite
+### 1. Clone PyDSL
 
-Currently, the only dependency are:
-- Python 3.12<=. You can easily use anaconda or miniconda to acquire this version and activate it as your environment.
-- MLIR's Python binding. Refer to its wiki for how to install and use. By the time you finish installing it, the Python binding's package folder should be on your PYTHONPATH and you should be able to import and use `mlir`'s modules.
+```sh
+git clone --recursive https://github.com/Huawei-PTLab/PyDSL.git
+cd PyDSL
+```
+
+### 2. Install MLIR with Python Bindings
+
+These install commands are based off the [MLIR Getting Started Guide](https://mlir.llvm.org/getting_started/) and the [MLIR Python Bindings Webpage](https://mlir.llvm.org/docs/Bindings/Python/).
+If you already have a relatively recent version of MLIR built with Python Bindings, this step can be skipped.
+
+```sh
+mkdir build
+cd build
+cmake -G Ninja ../llvm-project/llvm \
+    -DLLVM_ENABLE_PROJECTS=mlir \
+    -DLLVM_BUILD_EXAMPLES=ON \
+    -DLLVM_TARGETS_TO_BUILD="Native;NVPTX;AMDGPU" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+    -DPython3_EXECUTABLE="/usr/bin/python3"
+ninja check-mlir
+export PYTHONPATH=$(pwd)/tools/mlir/python_packages/mlir_core
+```
+
+These commands build MLIR with Python Binding, runs check MLIR to ensure the build was successful, and updates the `PYTHONPATH` variable to the mlir_core.
+
+If your `python3` executable is located in another location (or if you are using conda), just change the `Python3_EXECUTABLE` flag to point to the correct location.
+
+### 3. Running an Example
+
+The following is how to run a simple example from the test folder. From the root directory, type:
+```sh
+python3 test/simple.py
+```
+
+The expected output of this should look something like:
+```mlir
+module {
+  func.func public @lu(%arg0: f64, %arg1: memref<40xf64>) -> index {
+    %c40 = arith.constant 40 : index
+    %c1 = arith.constant 1 : index
+    %c0 = arith.constant 0 : index
+    %c1_0 = arith.constant 1 : index
+    scf.for %arg2 = %c0 to %c40 step %c1_0 {
+      %1 = memref.load %arg1[%arg2] : memref<40xf64>
+      %2 = arith.addf %1, %arg0 : f64
+      memref.store %2, %arg1[%arg2] : memref<40xf64>
+    }
+    %0 = arith.addi %c1, %c40 : index
+    return %0 : index
+  }
+}
+```
+
+### Requirements
+
+- Python 3.11 or above. You can easily use anaconda or miniconda to acquire this version and activate it as your environment.
+    - You will also need `numpy` and `pybind11` installed
 
 ## Import the compiler
 
@@ -46,7 +102,7 @@ from python_compiler.compiler import <whatever>
 # etc.
 ```
 
-# Boilerplate code
+## Boilerplate code
 
 ```py
 # Types are stored in the type.py in python_compiler. Import what you need.
@@ -74,9 +130,9 @@ See examples in the `examples` folder.
 The `@compile(locals())` will grab all variables defined before the function, and convert the function being decorated into MLIR.
 - this means that all type imports and type definitions must be done before and outside the function
 
-# Features
+## Features
 
-## Arithmetic
+### Arithmetic
 
 Addition, subtraction, multiplication, division are supported for float-likes
 
@@ -87,7 +143,7 @@ No integer multiplication/division
 
 No modulo
 
-## For loop
+### For loop
 
 Only `range` can be iterated.
 
@@ -107,7 +163,7 @@ for i in range(0, 5, 1):
     # code
 ```
 
-## Memref
+### Memref
 
 Define the size of your memref type outside of the function:
 E.g. this is memref<40x40xf64>
@@ -137,11 +193,11 @@ for arg4 in range(arg3):
     arg1[arg2, arg3] = v8
 ```
 
-# Other restriction
+## Other restriction
 
 As mentioned, this is a very strict subset of Python, and many features are either not yet implemented or too non-trivial to implement. This section goes over common Python features you cannot use.
 
-## Static typing only
+### Static typing only
 
 When you declare a variable while assigning it a constant, it MUST be in this format:
 ```py
@@ -175,11 +231,11 @@ c5 = 5
 var1 = var2 = c5
 ```
 
-## Only for statements; No if/while statements
+### Only for statements; No if/while statements
 
 This is simply not yet implemented.
 
-## No out-of-scope usage
+### No out-of-scope usage
 
 If a variable enters a scope and is modified within that scope, you cannot use it once it leaves the scope. In our case, scope refers to a `for` loop.
 
@@ -199,18 +255,18 @@ This is because the compiler currently do not support `scf.YieldOp` as supportin
 
 This does mean that a lot of code cannot be written using this compiler, but YieldOp is usually not needed for our domain-specific usage.
 
-## Don't use variables outside a function, unless it's a type used for type hinting
+### Don't use variables outside a function, unless it's a type used for type hinting
 
 The mechanisms for including and using outside variables are complicated and used only for specific purposes such as type hinting (types must be defined outside the function as type hinting is needed while the function itself is being defined). They are treated very differently from variables in your function.
 
-## All functions must return something
+### All functions must return something
 
 Void type is currently not supported. You must return a variable that has the same type as the function's type hinting
 
-## Only one function can be compiled for now
+### Only one function can be compiled for now
 
 Do not call any function. Do not define any sub-functions within a function.
 
-## If it looks fancy, it's probably not supported
+### If it looks fancy, it's probably not supported
 
 No list comprehension, no dictionary, no tuple, no multiple return type, no list, et cetera ad nauseum. We want to keep things simple for now.

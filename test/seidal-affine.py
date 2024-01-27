@@ -13,7 +13,7 @@ from pydsl.affine import            \
 
 memref_f32 = MemRefFactory((DYNAMIC, DYNAMIC), F32)
 
-@compile(locals(), dump_mlir=True)
+@compile(locals(), dump_mlir=True, auto_build=False)
 def seidal(t: Index, N: Index, A: memref_f32) -> Index:
     a: UInt32 = 5
     const: F32 = 9.0
@@ -27,7 +27,7 @@ def seidal(t: Index, N: Index, A: memref_f32) -> Index:
 
     return v0
 
-li = [(i % 39) for i in range(40 * 40)]
-retval = seidal(40, 40, li)
-print(f"Returned value:\t{retval}")
-print(f"Modified li:\t{li[:20]}")
+# li = [(i % 39) for i in range(40 * 40)]
+# retval = seidal(40, 40, li)
+# print(f"Returned value:\t{retval}")
+# print(f"Modified li:\t{li[:20]}")

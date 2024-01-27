@@ -13,7 +13,7 @@ from pydsl.affine import    \
 
 MemRefF32 = MemRefFactory((DYNAMIC, DYNAMIC), F32)
 
-@compile(locals(), dump_mlir=True)
+@compile(locals(), dump_mlir=True, auto_build=False)
 def jacobi(T: Index, N: Index, a: MemRefF32, b: MemRefF32) -> UInt32:
     dummy: UInt32 = 5
 
