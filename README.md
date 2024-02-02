@@ -108,7 +108,9 @@ Some of the testcases are not working with the submodule version of LLVM. Workin
 - test/lu-affine-transform.py
 - test/seidal-affine-transform.py
 
-## Import PyDSL
+## Using PyDSL
+
+### Import PyDSL
 
 In Python, you can only import Python files that are on your `sys.path`. This means that the file must be:
 - Installed as a package.
@@ -130,7 +132,7 @@ from python_compiler.compiler import <whatever>
 # etc.
 ```
 
-## Boilerplate code
+### Boilerplate code
 
 ```py
 # Types are stored in the type.py in python_compiler. Import what you need.
@@ -301,7 +303,7 @@ module {
 }
 ```
 
-## Other Restrictions
+## Restrictions
 
 As mentioned, this is a very strict subset of Python, and many features are either not yet implemented or too non-trivial to implement. This section goes over common Python features you cannot use.
 
