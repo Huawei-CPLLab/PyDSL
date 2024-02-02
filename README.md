@@ -47,7 +47,7 @@ These commands build MLIR with Python Binding, runs check MLIR to ensure the bui
 
 If your `python3` executable is located in another location (or if you are using conda), just change the `Python3_EXECUTABLE` flag to point to the correct location.
 
-NOTE: This sets the PYTHONPATH for your current terminal session. Closing and repopening the terminal will require you to rerun the export PYTHONPATH command again.
+NOTE: This sets the `PYTHONPATH` for your current terminal session. Closing and reopening the terminal will require you to rerun the `export PYTHONPATH` command again.
 
 ### 3. Running an Example
 
@@ -104,7 +104,6 @@ module {
 ## Known Issues
 
 Some of the testcases are not working with the submodule version of LLVM. Working on supporting:
-- test/cholesky-affine.py
 - test/heat-affine-transform.py
 - test/lu-affine-transform.py
 - test/seidal-affine-transform.py
