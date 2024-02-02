@@ -106,7 +106,6 @@ module {
 Some of the testcases are not working with the submodule version of LLVM. Working on supporting:
 - test/cholesky-affine.py
 - test/heat-affine-transform.py
-- test/heat-affine.py
 - test/lu-affine-transform.py
 - test/seidal-affine-transform.py
 

@@ -38,8 +38,8 @@ def heat(T: Index, N: Index, a: memref_f32, b: memref_f32) -> Index:
 
     return v0
 
-li = [(float(i % 9)) for i in range(10 * 10 * 10)]
-li_2 = [(float(i % 9)) for i in range(10 * 10 * 10)]
-retval = heat(10, 10, li, li_2)
-print(f"Returned value:\t{retval}")
-print(f"Modified li:\t{li[:20]}")
+# li = [(float(i % 9)) for i in range(10 * 10 * 10)]
+# li_2 = [(float(i % 9)) for i in range(10 * 10 * 10)]
+# retval = heat(10, 10, li, li_2)
+# print(f"Returned value:\t{retval}")
+# print(f"Modified li:\t{li[:20]}")
