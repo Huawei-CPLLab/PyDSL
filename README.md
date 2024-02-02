@@ -1,18 +1,15 @@
-# Python-to-MLIR compiler
+# PyDSL: A Python to MLIR Compiler
 
 ## Background
 
 This project aims to provide an interface between Python and MLIR with the following design goals:
-- Simple: The project should be easy to maintain with a thin layer of translation
+- Simple: The project should be easy to maintain with a thin layer of translation.
 - Reliable: The project needs to have a healthy amount of maintenance and contributors, such that we can rely on the project in the long run. Alternatively, we need to have full control over the project.
 - Pythonic: The syntax for as much of the API as possible should be legal Python, as well as concise as a precise language permits.
-    - This is motivated by the fact that much of the machine learning community uses Python
+    - This is motivated by the fact that much of the machine learning community uses Python.
 - Domain-specific: The aim is to use the language to write a specific class of difficult-to-optimize algorithms such as LU and Jacobi and exploit MLIR's tools to optimize them. 
 
-Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing, disallow variables modified within a scope to be used outside of it, 
-
-We are motivated to create this project in-house because existing third-party tools do not meet the above requirements:
-- Nelli/mlir-python-extras does not meet the simplicity requirement. As of 01/16/2024, it contains roughly 8000 lines of code. It has only one active contributor and there is no plan to integrate the project as part of the official MLIR upstream.
+Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing and to disallow variables modified within a scope to be used outside of it.
 
 ## Build Instructions
 
@@ -47,13 +44,14 @@ These commands build MLIR with Python Binding, runs check MLIR to ensure the bui
 
 If your `python3` executable is located in another location (or if you are using conda), just change the `Python3_EXECUTABLE` flag to point to the correct location.
 
+NOTE: This sets the PYTHONPATH for your current terminal session. Closing and repopening the terminal will require you to rerun the export PYTHONPATH command again.
+
 ### 3. Running an Example
 
 The following is how to run a simple example from the test folder. From the root directory, type:
 ```sh
 python3 test/simple.py
 ```
-
 The expected output of this should look something like:
 ```mlir
 module {
@@ -73,26 +71,55 @@ module {
 }
 ```
 
+There is also a version of this testcase that uses affine loops. Type:
+```sh
+python3 test/simple-affine.py
+```
+The expected output of this should look something like:
+```mlir
+#map = affine_map<(d0) -> (d0)>
+module {
+  func.func public @lu(%arg0: f64, %arg1: memref<40xf64>) -> index {
+    %c40 = arith.constant 40 : index
+    %c1 = arith.constant 1 : index
+    affine.for %arg2 = 0 to #map(%c40) {
+      %1 = affine.load %arg1[%arg2] : memref<40xf64>
+      %2 = arith.addf %1, %arg0 : f64
+      affine.store %2, %arg1[%arg2] : memref<40xf64>
+    }
+    %0 = arith.addi %c1, %c40 : index
+    return %0 : index
+  }
+}
+```
+
 ### Requirements
 
-- Python 3.11 or above. You can easily use anaconda or miniconda to acquire this version and activate it as your environment.
-    - You will also need `numpy` and `pybind11` installed
+- Python 3.11 or above. anaconda or miniconda can be used to acquire this version by activating it as your environment.
+    - You will also need `numpy` and `pybind11` installed.
 
-## Import the compiler
+## Known Issues
+
+Some of the testcases are not working with the submodule version of LLVM. Working on supporting:
+- test/cholesky-affine.py
+- test/heat-affine-transform.py
+- test/heat-affine.py
+- test/lu-affine-transform.py
+- test/seidal-affine-transform.py
+
+## Import PyDSL
 
 In Python, you can only import Python files that are on your `sys.path`. This means that the file must be:
 - Installed as a package.
     - This is not a viable option for now as there isn't the code in place to build the compiler as a package
 - Be within a package folder right next to your file.
-    - This is what I would do for now because it's easy.
+    - This is currently the easier option. Just place your Python file next to the `pydsl` folder.
 
-In our case, just place your Python file next to the `python_compiler` folder.
-
-- In your `PYTHONPATH` environment variable. 
+- In your `PYTHONPATH` environment variable, i.e. add `path/to/pydsl` to `PYTHONPATH`.
     - NOTE: this will be broken if your ever move the folder around. Not recommended unless you are sure your file will stay in place.
 - Modify the `sys.path` at runtime.
 
-E.g. this is done for the files in the `examples` folder to include `..` (relative to the location of the code file being run) before any `import` statement is made for the `python_compiler`:
+E.g. this is done for the files in the `test` folder to include `..` (relative to the location of the code file being run) before any `import` statement is made for the `pydsl`:
 ```py
 import sys
 from pathlib import Path
@@ -125,7 +152,7 @@ def my_function(arg_name_0: <type>, arg_name_1: <type>) -> <return_type>:
 
 This code will convert your `my_function` function into an MLIR function.
 
-See examples in the `examples` folder.
+See examples in the `test` folder.
 
 The `@compile(locals())` will grab all variables defined before the function, and convert the function being decorated into MLIR.
 - this means that all type imports and type definitions must be done before and outside the function
@@ -139,7 +166,7 @@ Addition, subtraction, multiplication, division are supported for float-likes
 Addition, subtraction are supported for integer-likes (such as index)
 
 No integer multiplication/division
-- This is simply because these operators are complicated in MLIR, and behavior differs for signed and unsigned integer. I might add it soon if I have time.
+- This is simply because these operators are complicated in MLIR, and behavior differs for signed and unsigned integer.
 
 No modulo
 
@@ -163,6 +190,30 @@ for i in range(0, 5, 1):
     # code
 ```
 
+### Affine
+affine maps, ranges, dimensions, and symbols are supported in PyDSL.
+
+```py
+from pydsl.affine import            \
+    affine_range as arange,         \
+    affine_map as am,               \
+    dimension as D,                 \
+    symbol as S                     
+```
+
+```py
+for i in arange(0, 5, 1):
+    # code
+for i in arange(0, D(a)):
+    # code
+for i in arange(S(t)):
+    # code
+for i in arange(D(a)):
+    # code
+# An example affinemap defined with dimension i to index over an array.
+arg1[am(D(i))] = arg1[am(D(i))] + v0
+```
+
 ### Memref
 
 Define the size of your memref type outside of the function:
@@ -173,7 +224,7 @@ memref_f64 = MemRefFactory((40, 40), F64)
 
 E.g. of using it
 ```py
-# suppose this is the function signature: def lu(v0: index, arg1: memref_f64) -> i32:
+# Suppose this is the function signature: def lu(v0: index, arg1: memref_f64) -> i32:
 # so arg1 is a memref<40x40xf64>
 
 for arg4 in range(arg3):
@@ -183,7 +234,7 @@ for arg4 in range(arg3):
     # arg2 and arg4 must be `index` type
     v4 = arg1[arg2, arg4] 
 
-    # do other stuff
+    # Do other stuff
     v5 = arg1[arg4, arg3]
     v6 = v4 * v5
     v7 = arg1[arg2, arg3]
@@ -209,7 +260,7 @@ If you use float, you have to always write the decimals. I will look into doing 
 my_float: f32 = 5.0 # NOT 5!
 ```
 
-MLIR and the compiler will take care of rest of the type evaluation. No type hinting should be used if you are assigning a variable to another
+MLIR and the compiler will take care of rest of the type evaluation. No type hinting should be used if you are assigning a variable to another.
 
 ```py
 var1 = var2
@@ -228,12 +279,12 @@ var1 = var2 + 5
 
 # Do
 c5 = 5
-var1 = var2 = c5
+var1 = var2 + c5
 ```
 
 ### Only for statements; No if/while statements
 
-This is simply not yet implemented.
+If and while statements are not yet implemented.
 
 ### No out-of-scope usage
 
