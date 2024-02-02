@@ -11,6 +11,9 @@ This project aims to provide an interface between Python and MLIR with the follo
 
 Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing and to disallow variables modified within a scope to be used outside of it.
 
+This work was presented at the [Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023. The video and slides can be found here:
+https://www.youtube.com/watch?v=nmtHeRkl850
+
 ## Build Instructions
 
 ### 1. Clone PyDSL
