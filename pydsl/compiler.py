@@ -13,7 +13,6 @@ import mlir.dialects.transform as transform
 
 from mlir.dialects.transform import structured
 
-from pydsl.transform import Transform
 from pydsl.metafunc import CallingMetafunction, IteratorMetafunction, SubscriptingMetafunction
 from pydsl.type import Lowerable, lower, lower_single, lower_flatten
 

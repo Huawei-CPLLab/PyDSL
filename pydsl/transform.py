@@ -18,30 +18,13 @@ from pydsl.metafunc import CallingMetafunction
 from pydsl.type import lower_single
 
 
-class Transform(ABC):
-
-    tag_attribute: str = ''
-
-    @abstractmethod
-    def target_op_type() -> str:
-        pass
-
-    @abstractmethod
-    def apply_transform(op) -> None:
-        pass
-
-    def tag(self, op, i) -> None:
-        self.tag_attribute = f'transform{i}'
-        op.attributes[self.tag_attribute] = UnitAttr.get()
-
-
-class LoopCoalesce(Transform):
+class loop_coalesce(CallingMetafunction):
+    def argtypes() -> List[CallingMetafunction.ArgType]:
+        return [tag.ArgType.MLIR]
     
-    def target_op_type() -> str:
-        return "scf.for"
-    
-    def apply_transform(op) -> None:
-        loop.LoopCoalesceOp(transform.OperationType.get("scf.for"), op)
+    def _on_Call(visitor: "ToMLIR", args: List[Any]) -> OpView:
+        target = args[0]
+        return loop.LoopCoalesceOp(transform.OperationType.get("scf.for"), target)
 
 
 class tag(CallingMetafunction):
