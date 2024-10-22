@@ -3,9 +3,9 @@ from mlir.ir import OpView
 
 from mlir.ir import *
 from mlir.dialects.math import SqrtOp, ExpOp, PowFOp, AbsFOp
-from python_bindings_mlir.helpers import ToMLIRBase
+from pydsl.protocols import ToMLIRBase
 
-from python_bindings_mlir.macro import ArgRep, CallMacro
+from pydsl.macro import ArgRep, CallMacro
 
 
 class sqrt(CallMacro):

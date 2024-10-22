@@ -1,17 +1,17 @@
 import typing
-from python_bindings_mlir.memref import MemRef
-from python_bindings_mlir.tensor import Tensor
+from pydsl.memref import MemRef
+from pydsl.tensor import Tensor
 
 # Compiled TypeAlias needs Lowerable
-from python_bindings_mlir.type import Float, Int, Sign, Lowerable
+from pydsl.type import Float, Int, Sign, Lowerable
 
 from mlir.dialects import linalg as mlir_linalg
 from mlir.dialects.linalg import DefinedOpCallable
 from mlir.dialects.linalg.opdsl.lang.comprehension import TypeFn, BinaryFn
 import mlir.dialects.linalg as linalg
 
-from python_bindings_mlir.common import CallMacro, Compiled
-from python_bindings_mlir.helpers import lower_single, ToMLIRBase
+from pydsl.macro import CallMacro, Compiled
+from pydsl.protocols import lower_single, ToMLIRBase
 
 
 def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:

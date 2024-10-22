@@ -14,10 +14,10 @@ from typing import (
 
 import mlir.ir as mlir
 from mlir.ir import OpView, Operation, Value
-from python_bindings_mlir.scope import ScopeStack
+from pydsl.scope import ScopeStack
 
 if TYPE_CHECKING:
-    from python_bindings_mlir.type import Bool
+    from pydsl.type import Bool
 
 
 @runtime_checkable
@@ -214,7 +214,7 @@ def handle_CompileTimeCallable(
                 on_Call = type(x).on_Call
 
         match on_Call:
-            # Is this object callable using python_bindings_mlir's protocol mechanism?
+            # Is this object callable using pydsl's protocol mechanism?
             case CompileTimeCallable():
                 attr_chain.append(on_Call)
                 continue

@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Any
 import typing
 
-from python_bindings_mlir.analysis import BoundAnalysis, UsedAnalysis
+from pydsl.analysis import BoundAnalysis, UsedAnalysis
 
 
 class Scope:

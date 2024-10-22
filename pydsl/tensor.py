@@ -6,14 +6,14 @@ from functools import cache
 import mlir.ir as mlir
 from mlir.ir import OpView, RankedTensorType, Value
 import mlir.dialects.tensor as mlir_tensor
-from python_bindings_mlir.memref import UsesRMRD
-from python_bindings_mlir.helpers import lower
+from pydsl.memref import UsesRMRD
+from pydsl.protocols import lower
 
-from python_bindings_mlir.type import Index, Lowerable, lower_single
+from pydsl.type import Index, Lowerable, lower_single
 
 DYNAMIC = -9223372036854775808
 
-# used for the virtual static-typing in python_bindings_mlir
+# used for the virtual static-typing in pydsl
 Dynamic = typing.Literal[-9223372036854775808]
 RawRMRD = tuple[c_void_p | int]
 RuntimeTensorShape = list[int | Value]
@@ -126,7 +126,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
 
     # TODO: potential dead code. MLIR already compute all the dims for us if we
     # pass the input tensor as the output tensor as well. I feel this can still
-    # be useful if the end python_bindings_mlir user wants to get the shape though.
+    # be useful if the end pydsl user wants to get the shape though.
     @property
     def runtime_shape(self) -> RuntimeTensorShape:
         """

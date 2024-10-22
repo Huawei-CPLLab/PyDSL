@@ -11,7 +11,7 @@ from typing import Annotated, Any, Self
 
 from mlir.ir import OpView
 
-from python_bindings_mlir.helpers import Lowerable, ToMLIRBase
+from pydsl.protocols import Lowerable, ToMLIRBase
 
 
 class Macro(ABCMeta):
@@ -68,13 +68,13 @@ class ArgRep(Enum):
 
     Please note: once the Python runtime is opened, all CallMacros nested
     inside it will demand all arguments in compile-time Python representation.
-    python_bindings_mlir may no longer be used.
+    pydsl may no longer be used.
     For instance, if you nest a CallMacro `f` inside a PYTHON ArgType
     argument, and `f` demands a TREE as its first argument,
     then you must pass in an ast.AST Python object, not writing the
     representation of such tree as-is.
 
-    As an example, writing f(4) in python_bindings_mlir is equivalent to writing
+    As an example, writing f(4) in pydsl is equivalent to writing
     f(Expr(value=Constant(value=4))) in compile-time Python.
     """
 

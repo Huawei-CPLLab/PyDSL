@@ -10,7 +10,7 @@ from pydsl.scf import range
 MemRefF64 = MemRefFactory((40,), F64)
 
 @compile(locals(), dump_mlir=True, auto_build=False)
-def lu(v0: F64, arg1: MemRefF64) -> Index:
+def example(v0: F64, arg1: MemRefF64) -> Index:
     a: Index = 40
     c1: Index = 1
 
