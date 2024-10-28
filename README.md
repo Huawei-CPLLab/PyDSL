@@ -369,10 +369,6 @@ This does mean that a lot of code cannot be written using this compiler, but Yie
 
 The mechanisms for including and using outside variables are complicated and used only for specific purposes such as type hinting (types must be defined outside the function as type hinting is needed while the function itself is being defined). They are treated very differently from variables in your function.
 
-### All functions must return something
-
-Void type is currently not supported. You must return a variable that has the same type as the function's type hinting
-
 ### Only one function can be compiled for now
 
 Do not call any function. Do not define any sub-functions within a function.
