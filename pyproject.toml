@@ -1,0 +1,46 @@
+[project]
+name = "pydsl"
+version = "0.0.1"
+authors = [
+  { name="Kevin Lee", email="k323lee@uwaterloo.ca" },
+]
+# description = "A small example package"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy",
+  "PyYAML"
+]
+
+[project.urls]
+Homepage = "https://github.com/Huawei-CPLLab/PyDSL"
+Issues = "https://github.com/Huawei-CPLLab/PyDSL/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[pytest]
+testpaths = ["tests/"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
+[tool.ruff]
+line-length = 79
+indent-width = 4
+
+[tool.ruff.format]
+preview = true
+quote-style = "double"
+
+[tool.ruff.lint]
+preview = true
+extend-select = ["C901"]
+ignore = ["T201", "N803", "N812", "PYI030", "F401"]

@@ -1,26 +1,26 @@
 # PyDSL: A Python to MLIR Compiler
 
-## Background
-
 This project aims to provide an interface between Python and MLIR with the following design goals:
-- Simple: The project should be easy to maintain with a thin layer of translation.
-- Reliable: The project needs to have a healthy amount of maintenance and contributors, such that we can rely on the project in the long run. Alternatively, we need to have full control over the project.
-- Pythonic: The syntax for as much of the API as possible should be legal Python, as well as concise as a precise language permits.
-    - This is motivated by the fact that much of the machine learning community uses Python.
-- Domain-specific: The aim is to use the language to write a specific class of difficult-to-optimize algorithms such as LU and Jacobi and exploit MLIR's tools to optimize them. 
+- **Simple**. The project should be easy to maintain with a thin layer of translation.
+- **Pythonic**. The syntax for as much of the API as possible should be legal Python, as well as concise as a precise language permits.
+- **Domain-specific**. The aim is to use the language to write a specific class of difficult-to-optimize algorithms such as LU and Jacobi and exploit MLIR's tools to optimize them. 
 
-Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing and to disallow variables modified within a scope to be used outside of it.
+Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing, disallow variables modified within a scope to be used outside of it.
 
 ### Presentations
 PyDSL has been presented at the following venues:
 
 [Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023:
-- Slides: https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf
-- Video: https://www.youtube.com/watch?v=nmtHeRkl850
+- [Slides](https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf)
+- [Video](https://www.youtube.com/watch?v=nmtHeRkl850)
 
 [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg):
-- Slides: https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf
-- Video: *Pending*
+- [Slides](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf)
+- [Video](https://www.youtube.com/watch?v=iYLxgTRe8TU)
+
+## Usage
+
+Refer to the user documentation here: [docs/usage.md](docs/usage.md).
 
 ## Build Instructions
 
@@ -376,6 +376,10 @@ This does mean that a lot of code cannot be written using this compiler, but Yie
 ### Don't use variables outside a function, unless it's a type used for type hinting
 
 The mechanisms for including and using outside variables are complicated and used only for specific purposes such as type hinting (types must be defined outside the function as type hinting is needed while the function itself is being defined). They are treated very differently from variables in your function.
+
+### All functions must return something
+
+Void type is currently not supported. You must return a variable that has the same type as the function's type hinting
 
 ### Only one function can be compiled for now
 
