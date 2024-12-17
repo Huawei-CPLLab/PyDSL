@@ -2,39 +2,103 @@
 
 This project aims to provide an interface between Python and MLIR with the following design goals:
 - **Simple**. The project should be easy to maintain with a thin layer of translation.
-- **Pythonic**. The syntax for as much of the API as possible should be legal Python, as well as concise as a precise language permits.
-- **Domain-specific**. The aim is to use the language to write a specific class of difficult-to-optimize algorithms such as LU and Jacobi and exploit MLIR's tools to optimize them. 
+- **Pythonic**. The syntax for PyDSL should be as close to legal Python as possible, while maintaining the precision of MLIR.
 
-Simplicity and being Pythonic are conflicting goals. Thus, we have to aim for a very strict subset of Python that enforces static typing, disallow variables modified within a scope to be used outside of it.
+Simplicity and being Pythonic are conflicting goals. In order to maintain simplicity, we have to aim for a very strict subset of Python that benefits domain-specific applications such as affine programming with little if-else statements. As such, certain programs will be easy to write while others will be nearly infeasible.
 
-### Presentations
+# Presentations
 PyDSL has been presented at the following venues:
 
-[Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023:
-- [Slides](https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf)
-- [Video](https://www.youtube.com/watch?v=nmtHeRkl850)
+- [Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023: 📊 [**Slides**](https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=nmtHeRkl850)
+- [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=iYLxgTRe8TU)
 
-[2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg):
-- [Slides](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf)
-- [Video](https://www.youtube.com/watch?v=iYLxgTRe8TU)
-
-## Usage
+# Usage
 
 Refer to the user documentation here: [docs/usage.md](docs/usage.md).
 
-## Build Instructions
+## PyDSL at a glance
 
-### 1. Clone PyDSL
+```py
+import numpy as np
+from pydsl.frontend import compile
+from pydsl.affine import affine_range as arange
+from pydsl.memref import DYNAMIC, MemRefFactory
+from pydsl.type import Index, UInt64
 
-```sh
-git clone --recursive https://github.com/Huawei-PTLab/PyDSL.git
-cd PyDSL
+MemRef64 = MemRefFactory((DYNAMIC, DYNAMIC), UInt64)
+
+
+@compile(dump_mlir=True)
+def my_function(size: Index, m: MemRef64) -> MemRef64:
+    o = size // 2
+
+    for i in arange(size):
+        m[1, i] = o
+        m[i, i] = i + o
+
+    return m
+
+
+arr = np.zeros((8, 8), dtype=np.uint64)
+
+print(hello_memref(8, arr))
+
 ```
 
-### 2. Install MLIR with Python Bindings
+This code will convert your `my_function` function into an MLIR function:
+```mlir
+module {
+  func.func public @hello_memref(%arg0: index, %arg1: memref<?x?xi64>) -> memref<?x?xi64> {
+    %c2 = arith.constant 2 : index
+    %0 = index.floordivs %arg0, %c2
+    affine.for %arg2 = 0 to %arg0 {
+      %1 = arith.index_castui %0 : index to i64
+      affine.store %1, %arg1[1, %arg2] : memref<?x?xi64>
+      %2 = index.add %arg2, %0
+      %3 = arith.index_castui %2 : index to i64
+      affine.store %3, %arg1[%arg2, %arg2] : memref<?x?xi64>
+    }
+    return %arg1 : memref<?x?xi64>
+  }
+}
+```
 
-These install commands are based off the [MLIR Getting Started Guide](https://mlir.llvm.org/getting_started/) and the [MLIR Python Bindings Webpage](https://mlir.llvm.org/docs/Bindings/Python/).
-If you already have a relatively recent version of MLIR built with Python Bindings, this step can be skipped.
+The function will return the following array:
+```py
+(array([[ 4,  0,  0,  0,  0,  0,  0,  0],
+       [ 4,  5,  4,  4,  4,  4,  4,  4],
+       [ 0,  0,  6,  0,  0,  0,  0,  0],
+       [ 0,  0,  0,  7,  0,  0,  0,  0],
+       [ 0,  0,  0,  0,  8,  0,  0,  0],
+       [ 0,  0,  0,  0,  0,  9,  0,  0],
+       [ 0,  0,  0,  0,  0,  0, 10,  0],
+       [ 0,  0,  0,  0,  0,  0,  0, 11]], dtype=uint64),)
+```
+
+See more examples in the `examples` or `tests/e2e` folder.
+
+# Instruction for installation
+
+Follow through all of the subsections below to install and use PyDSL.
+
+## Prerequisites
+
+Before performing any installation, you need:
+- Python 3.11<= (preferably as a virtual environment) with the following packages:
+    - `numpy`
+    - `pybind11`
+- MLIR built with Python binding or a clone of `llvm-project`
+  - a `llvm-project` git submodule is provided in this repo for your convenience.
+
+## Installing MLIR Python binding
+
+If you already have a relatively recent version of MLIR built with Python bindings, this step can be skipped.
+
+The [official documentation](https://mlir.llvm.org/docs/Bindings/Python/#building) has the most definitive instruction on installing the binding. A git submodule of `llvm-project` is also available for your convenience.
+
+Here we will summarize the process for a basic setup:
+
+Once this git repository is cloned, go to the `llvm-project` submodule and run these commands to build MLIR with Python binding:
 
 ```sh
 mkdir build
@@ -46,345 +110,86 @@ cmake -G Ninja ../llvm-project/llvm \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-    -DPython3_EXECUTABLE="/usr/bin/python3"
+    -DPython3_EXECUTABLE="/usr/bin/python3" # Change this to your Python installation path
 ninja check-mlir
 export PYTHONPATH=$(pwd)/tools/mlir/python_packages/mlir_core
 ```
 
-These commands build MLIR with Python Binding, runs check MLIR to ensure the build was successful, and updates the `PYTHONPATH` variable to the mlir_core.
+> 📌 **NOTES**:
+>- If your `python3` executable is located in another location (or if you are using conda), change the `Python3_EXECUTABLE` flag to point to the correct location.
+>- This sets the `PYTHONPATH` for your current terminal session. Closing and reopening the terminal will require you to rerun the `export PYTHONPATH` command again.
 
-If your `python3` executable is located in another location (or if you are using conda), just change the `Python3_EXECUTABLE` flag to point to the correct location.
+To confirm you installed the binding properly, the Python binding's package folder should be on your `PYTHONPATH` and you should be able to import and use the binding by importing `mlir` in the Python REPL.
 
-NOTE: This sets the `PYTHONPATH` for your current terminal session. Closing and reopening the terminal will require you to rerun the `export PYTHONPATH` command again.
+## Installing PyDSL
 
-### 3. Running an Example
+There are 2 methods to install PyDSL:
+- **Quick editable install**: This method lets you edit the source code of PyDSL as you are using it. Ideal for PyDSL development.
+- **Building a wheel**: This method packages PyDSL into a standalone wheel that is suitable for deployment.
 
-The following is how to run a simple example from the test folder. From the root directory, type:
+## Quick editable install
+
+If you don't want to build PyDSL and want to develop PyDSL as you are using it, you can just perform an editable package install:
+1. Go to the root of this project (same folder as `pyproject.toml`)
+2. Run `pip install -e .`
+3. Run `pip list` and check that it is indeed an editable package:
+
+```
+Package    Version Editable project location
+---------- ------- ------------------------------------------
+...
+pydsl      0.0.1   <your PyDSL location>
+...
+```
+
+`Editable project location` should be a field for the entry on `pydsl`. It should be pointing to this project folder.
+
+## Building a wheel
+
+This project uses Hatch as its project manager. Refer to hatch's documentation on installing it: https://hatch.pypa.io/1.12/install/#pip.
+
+If you are running any of the commands below for the first time, or if you are left in a dirty environment state, run
+
 ```sh
-python3 test/simple.py
-```
-The expected output of this should look something like:
-```mlir
-module {
-  func.func public @lu(%arg0: f64, %arg1: memref<40xf64>) -> index {
-    %c40 = arith.constant 40 : index
-    %c1 = arith.constant 1 : index
-    %c0 = arith.constant 0 : index
-    %c1_0 = arith.constant 1 : index
-    scf.for %arg2 = %c0 to %c40 step %c1_0 {
-      %1 = memref.load %arg1[%arg2] : memref<40xf64>
-      %2 = arith.addf %1, %arg0 : f64
-      memref.store %2, %arg1[%arg2] : memref<40xf64>
-    }
-    %0 = arith.addi %c1, %c40 : index
-    return %0 : index
-  }
-}
+hatch env prune
 ```
 
-There is also a version of this testcase that uses affine loops. Type:
+To generate wheel, run
+
 ```sh
-python3 test/simple-affine.py
-```
-The expected output of this should look something like:
-```mlir
-#map = affine_map<(d0) -> (d0)>
-module {
-  func.func public @lu(%arg0: f64, %arg1: memref<40xf64>) -> index {
-    %c40 = arith.constant 40 : index
-    %c1 = arith.constant 1 : index
-    affine.for %arg2 = 0 to #map(%c40) {
-      %1 = affine.load %arg1[%arg2] : memref<40xf64>
-      %2 = arith.addf %1, %arg0 : f64
-      affine.store %2, %arg1[%arg2] : memref<40xf64>
-    }
-    %0 = arith.addi %c1, %c40 : index
-    return %0 : index
-  }
-}
+hatch build
 ```
 
-### Requirements
+The wheel will be located in `dist/`.
 
-- Python 3.11 or above. anaconda or miniconda can be used to acquire this version by activating it as your environment.
-    - You will also need `numpy` and `pybind11` installed.
+To remove all the generated artifacts, run
 
-## Known Issues
-
-Some of the testcases are not working with the submodule version of LLVM. Working on supporting:
-- test/heat-affine-transform.py
-- test/lu-affine-transform.py
-- test/seidal-affine-transform.py
-
-## Using PyDSL
-
-### Import PyDSL
-
-In Python, you can only import Python files that are on your `sys.path`. This means that the file must be:
-- Installed as a package.
-    - This is not a viable option for now as there isn't the code in place to build the compiler as a package
-- Be within a package folder right next to your file.
-    - This is currently the easier option. Just place your Python file next to the `pydsl` folder.
-
-- In your `PYTHONPATH` environment variable, i.e. add `path/to/pydsl` to `PYTHONPATH`.
-    - NOTE: this will be broken if your ever move the folder around. Not recommended unless you are sure your file will stay in place.
-- Modify the `sys.path` at runtime.
-
-E.g. this is done for the files in the `test` folder to include `..` (relative to the location of the code file being run) before any `import` statement is made for the `pydsl`:
-```py
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent / '..'))
-
-from python_compiler.compiler import <whatever>
-# etc.
+```sh
+hatch clean
 ```
 
-### Boilerplate code
+# Development
 
-```py
-# Types are stored in the type.py in python_compiler. Import what you need.
-from pydsl.type import UInt32, F32, Index
+While not mandatory, it is recommended that you use Hatch (the project manager of PyDSL) to aid development. Refer to Hatch's documentation on installing it: https://hatch.pypa.io/1.12/install/#pip. Hatch will automatically install and use the right Python enviornment for various development actions.
 
-# Always import this
-from pydsl.frontend import compile
+## Testing
 
-# Here is how you construct a memref that is ?x?xf32
-memref_f32 = MemRefFactory((DYNAMIC, DYNAMIC), F32)
-
-
-@compile(locals())
-# Replace <type> with the type of the argument that you imported from python_compiler.type, same for <return_type>.
-# All type hinting shown are MANDATORY! 
-# Do not use any other Python argument features! No *args! No **kwargs!
-def my_function(arg_name_0: <type>, arg_name_1: <type>) -> <return_type>:
-    # Your Python code
+To test the code, make sure to do a build, prune your environment, then run `hatch test`
+```sh
+hatch build
+hatch env prune
+hatch test
 ```
 
-This code will convert your `my_function` function into an MLIR function.
+If you do not have Hatch, you can also install `pytest` and run `python3 -m pytest .` at the top of this project. Be wary of what Python version and packages `pytest` is using for its tests!
 
-See examples in the `test` folder.
+## Formatting
 
-The `@compile(locals())` will grab all variables defined before the function, and convert the function being decorated into MLIR.
-- this means that all type imports and type definitions must be done before and outside the function
-
-## Features
-
-### Arithmetic
-
-Addition, subtraction, multiplication, division are supported for float-likes
-
-Addition, subtraction are supported for integer-likes (such as index)
-
-No integer multiplication/division
-- This is simply because these operators are complicated in MLIR, and behavior differs for signed and unsigned integer.
-
-No modulo
-
-### For loop
-
-Only `range` can be iterated.
-
-E.g.
-```py
-# range can be:
-# - range(upper_bound), which will iterate each integer between 0 (inclusive) to upper_bound (exclusive)
-# - range(lower_bound, upper_bound), which will iterate each integer between lower_bound (inclusive) to upper_bound (exclusive)
-# - range(lower_bound, upper_bound, step), which is equivalent to scf.for %iter_arg = %lower_bound to %upper_bound step %step { ... }
-for i in range(5):
-    # code
-
-for i in range(0, 5):
-    # code
-
-for i in range(0, 5, 1):
-    # code
+To format the code, run
+```sh
+hatch fmt -f
 ```
+> ⚠️ **WARNING:**
+> DO NOT RUN `hatch fmt` WITHOUT THE `-f` FLAG! This will cause unsafe changes which breaks any test or examples that uses docstring directives.
 
-### Affine
-affine maps, ranges, dimensions, and symbols are supported in PyDSL.
-
-```py
-from pydsl.affine import            \
-    affine_range as arange,         \
-    affine_map as am,               \
-    dimension as D,                 \
-    symbol as S                     
-```
-
-```py
-for i in arange(0, 5, 1):
-    # code
-for i in arange(0, D(a)):
-    # code
-for i in arange(S(t)):
-    # code
-for i in arange(D(a)):
-    # code
-# An example affinemap defined with dimension i to index over an array.
-arg1[am(D(i))] = arg1[am(D(i))] + v0
-```
-
-### Memref
-
-Define the size of your memref type outside of the function:
-E.g. this is memref<40x40xf64>
-```py
-memref_f64 = MemRefFactory((40, 40), F64)
-```
-
-E.g. of using it
-```py
-# Suppose this is the function signature: def lu(v0: index, arg1: memref_f64) -> i32:
-# so arg1 is a memref<40x40xf64>
-
-for arg4 in range(arg3):
-    # Load from arg1 to v4
-    # NOTE: you must put in a tuple as the index: arg1[arg2, arg4]
-    # Currying the index arg1[arg2][arg4] is not allowed!
-    # arg2 and arg4 must be `index` type
-    v4 = arg1[arg2, arg4] 
-
-    # Do other stuff
-    v5 = arg1[arg4, arg3]
-    v6 = v4 * v5
-    v7 = arg1[arg2, arg3]
-    v8 = v7 - v6
-
-    # Save to arg1 from v8
-    arg1[arg2, arg3] = v8
-```
-
-### Transform Ops
-
-Transforms within PyDSL are generated by defining a transform sequence function which is then passed into the compile flag. The function to be converted to MLIR can then be tagged with various flags to determing the location of the transform ops.
-
-For example, see the following from `test/simple-transform.py`:
-```python
-from pydsl.transform import tag, loop_coalesce, match_tag as match
-
-MemRefF64 = MemRefFactory((40,50,), F64)
-
-def transform_seq(targ: AnyOp):
-    loop_coalesce(match(targ, 'coalesce'))
-
-@compile(locals(), transform_seq=transform_seq, dump_mlir=True, auto_build=False)
-def simple_case(v0: F64, arg1: MemRefF64) -> Index:
-    N: Index = 40
-    M: Index = 50
-    c1: Index = 1
-
-    """@tag("coalesce")"""
-    for i in range(N):
-        for j in range(M):
-            arg1[i, j] = arg1[i, j] + v0
-    
-    return c1 + N + M
-```
-Note that tags are placed in a docstring within the function iteslf and are read while converting to MLIR to determine tag locations. The resulting MLIR output for the transform sequence would look like this:
-```mlir
-module {
-  func.func public @simple_case(%arg0: f64, %arg1: memref<40x50xf64>) -> index {
-    %c40 = arith.constant 40 : index
-    %c50 = arith.constant 50 : index
-    %c1 = arith.constant 1 : index
-    %c0 = arith.constant 0 : index
-    %c1_0 = arith.constant 1 : index
-    scf.for %arg2 = %c0 to %c40 step %c1_0 {
-      %c0_1 = arith.constant 0 : index
-      %c1_2 = arith.constant 1 : index
-      scf.for %arg3 = %c0_1 to %c50 step %c1_2 {
-        %2 = memref.load %arg1[%arg2, %arg3] : memref<40x50xf64>
-        %3 = arith.addf %2, %arg0 : f64
-        memref.store %3, %arg1[%arg2, %arg3] : memref<40x50xf64>
-      }
-    } {coalesce}
-    %0 = arith.addi %c1, %c40 : index
-    %1 = arith.addi %0, %c50 : index
-    return %1 : index
-  }
-  transform.sequence  failures(propagate) {
-  ^bb0(%arg0: !transform.any_op):
-    %0 = transform.structured.match attributes {coalesce} in %arg0 : (!transform.any_op) -> !transform.any_op
-    %1 = transform.loop.coalesce %0 : (!transform.any_op) -> !transform.op<"scf.for">
-  }
-}
-```
-
-## Restrictions
-
-As mentioned, this is a very strict subset of Python, and many features are either not yet implemented or too non-trivial to implement. This section goes over common Python features you cannot use.
-
-### Static typing only
-
-When you declare a variable while assigning it a constant, it MUST be in this format:
-```py
-var_name: <type> = <constant, must be integer or float>
-```
-If you use float, you have to always write the decimals. I will look into doing auto casting some time down the line.
-
-```py
-my_float: f32 = 5.0 # NOT 5!
-```
-
-MLIR and the compiler will take care of rest of the type evaluation. No type hinting should be used if you are assigning a variable to another.
-
-```py
-var1 = var2
-```
-
-or if you are getting a value that is calling a MLIR operation behind the scene
-```py
-# var1 is actually being assigned the memref.LoadOp behind the scene. MLIR will take care of var1's type for you.
-var1 = my_memref[12, 12]
-```
-
-For now, do not use a constant as-is in an expression, as the compiler cannot yet infer its type.
-```py
-# Don't
-var1 = var2 + 5 
-
-# Do
-c5 = 5
-var1 = var2 + c5
-```
-
-### Only for statements; No if/while statements
-
-If and while statements are not yet implemented.
-
-### No out-of-scope usage
-
-If a variable enters a scope and is modified within that scope, you cannot use it once it leaves the scope. In our case, scope refers to a `for` loop.
-
-E.g.
-```py
-a = 5 # a is defined outside of the scope
-
-# this is our scope
-for i in range(50):
-    a = 10 # a is modified within the scope
-    b = a + 1 # this is fine
-
-b = a # NOT ALLOWED!
-```
-
-This is because the compiler currently do not support `scf.YieldOp` as supporting it requires variable usage analysis. A prototype visitor class has been successfully made, but for the sake of simplicity it is currently not part of the compiler. 
-
-This does mean that a lot of code cannot be written using this compiler, but YieldOp is usually not needed for our domain-specific usage.
-
-### Don't use variables outside a function, unless it's a type used for type hinting
-
-The mechanisms for including and using outside variables are complicated and used only for specific purposes such as type hinting (types must be defined outside the function as type hinting is needed while the function itself is being defined). They are treated very differently from variables in your function.
-
-### All functions must return something
-
-Void type is currently not supported. You must return a variable that has the same type as the function's type hinting
-
-### Only one function can be compiled for now
-
-Do not call any function. Do not define any sub-functions within a function.
-
-### If it looks fancy, it's probably not supported
-
-No list comprehension, no dictionary, no tuple, no multiple return type, no list, et cetera ad nauseum. We want to keep things simple for now.
+If you do not have Hatch, you can also install and use Python formatters such as `black` or `ruff`.
