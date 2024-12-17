@@ -4,7 +4,6 @@ from typing import Optional
 
 from mlir.dialects import transform
 from mlir.dialects.transform import loop, structured
-from mlir.dialects.transform import validator as taffine
 from mlir.ir import IndexType, IntegerAttr, OpView, UnitAttr
 
 from pydsl.macro import CallMacro, Compiled, Evaluated, Uncompiled
@@ -136,14 +135,7 @@ def match_tag(
 def fuse_into(
     visitor: ToMLIRBase, loop: Compiled[AnyOp], target: Compiled[AnyOp]
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorFuseIntoOp(
-            # TODO: assume this is always AnyOpType for now
-            transform.AnyOpType.get(),
-            lower_single(target),
-            lower_single(loop),
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
@@ -153,15 +145,7 @@ def fuse(
     target2: Compiled[AnyOp],
     depth: Evaluated[int],
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorFuseOp(
-            # TODO: assume this is always AnyOpType for now
-            transform.AnyOpType.get(),
-            lower_single(target1),
-            lower_single(target2),
-            depth,
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
@@ -171,16 +155,7 @@ def skew(
     inner: Compiled[AnyOp],
     amount: Evaluated[int],
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorSkewOp(
-            # TODO: assume this is always AnyOpType for now
-            skewed=transform.AnyOpType.get(),
-            unchanged=transform.AnyOpType.get(),
-            outer=lower_single(outer),
-            inner=lower_single(inner),
-            amount=amount,
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
@@ -190,14 +165,7 @@ def blockreorder(
     retlen: Evaluated[int],
     *inputs: list[Compiled[AnyOp]],
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorBlockReorderOp(
-            # TODO: assume this is always AnyOpType for now
-            outputs=[transform.AnyOpType.get()] * retlen,
-            inputs=[lower_single(i) for i in inputs],
-            permutation=permutation,
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
@@ -207,13 +175,7 @@ def tile(
     tile_sizes: Evaluated[int],
     retlen: Evaluated[int],
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorLoopTilingOp(
-            [transform.AnyOpType.get()] * retlen,
-            lower_single(target),
-            tile_sizes=tile_sizes,
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
@@ -222,25 +184,14 @@ def reorder(
     first_loop: Compiled[AnyOp],
     second_loop: Compiled[AnyOp],
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorReorderOp(
-            transform.AnyOpType.get(),
-            [transform.AnyOpType.get()],
-            first_loop=lower_single(first_loop),
-            second_loop=lower_single(second_loop),
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
 def unroll(
     visitor: ToMLIRBase, target: Compiled[AnyOp], factor: Evaluated
 ) -> AnyOp:
-    return AnyOp(
-        taffine.ValidatorUnrollOp(
-            transform.AnyOpType.get(), lower_single(target), factor=factor
-        )
-    )
+    raise NotImplementedError()
 
 
 @CallMacro.generate()
