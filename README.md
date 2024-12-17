@@ -103,20 +103,20 @@ Once this git repository is cloned, go to the `llvm-project` submodule and run t
 ```sh
 mkdir build
 cd build
-cmake -G Ninja ../llvm-project/llvm \
+cmake -G Ninja ../llvm \
     -DLLVM_ENABLE_PROJECTS=mlir \
     -DLLVM_BUILD_EXAMPLES=ON \
     -DLLVM_TARGETS_TO_BUILD="Native;NVPTX;AMDGPU" \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-    -DPython3_EXECUTABLE="/usr/bin/python3" # Change this to your Python installation path
+    -DPython3_EXECUTABLE="/usr/bin/python3" # Change this to your Python installation path, namely the result of `which python3`
 ninja check-mlir
 export PYTHONPATH=$(pwd)/tools/mlir/python_packages/mlir_core
 ```
 
 > 📌 **NOTES**:
->- If your `python3` executable is located in another location (or if you are using conda), change the `Python3_EXECUTABLE` flag to point to the correct location.
+>- If your `python3` executable is located in another location (or if you are using conda), change the `Python3_EXECUTABLE` flag to point to the correct location. If you are not sure, use the result of `which python3`.
 >- This sets the `PYTHONPATH` for your current terminal session. Closing and reopening the terminal will require you to rerun the `export PYTHONPATH` command again.
 
 To confirm you installed the binding properly, the Python binding's package folder should be on your `PYTHONPATH` and you should be able to import and use the binding by importing `mlir` in the Python REPL.
