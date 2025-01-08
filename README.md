@@ -84,9 +84,7 @@ Follow through all of the subsections below to install and use PyDSL.
 ## Prerequisites
 
 Before performing any installation, you need:
-- Python 3.11<= (preferably as a virtual environment) with the following packages:
-    - `numpy`
-    - `pybind11`
+- An environment with Python 3.11 or greater. All requirements can be installed via `pip install -r requirements.txt`
 - MLIR built with Python binding or a clone of `llvm-project`
   - a `llvm-project` git submodule is provided in this repo for your convenience.
 
@@ -110,7 +108,7 @@ cmake -G Ninja ../llvm \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-    -DPython3_EXECUTABLE="/usr/bin/python3" # Change this to your Python installation path, namely the result of `which python3`
+    -DPython3_EXECUTABLE="$(which python3)" # If you are using something like a virtual environment, make sure it is active
 ninja check-mlir
 export PYTHONPATH=$(pwd)/tools/mlir/python_packages/mlir_core
 ```
