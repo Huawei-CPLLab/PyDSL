@@ -41,14 +41,14 @@ def my_function(size: Index, m: MemRef64) -> MemRef64:
 
 arr = np.zeros((8, 8), dtype=np.uint64)
 
-print(hello_memref(8, arr))
+print(my_function(8, arr))
 
 ```
 
 This code will convert your `my_function` function into an MLIR function:
 ```mlir
 module {
-  func.func public @hello_memref(%arg0: index, %arg1: memref<?x?xi64>) -> memref<?x?xi64> {
+  func.func public @my_function(%arg0: index, %arg1: memref<?x?xi64>) -> memref<?x?xi64> {
     %c2 = arith.constant 2 : index
     %0 = index.floordivs %arg0, %c2
     affine.for %arg2 = 0 to %arg0 {
