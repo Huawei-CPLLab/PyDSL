@@ -10,7 +10,8 @@ Simplicity and being Pythonic are conflicting goals. In order to maintain simpli
 PyDSL has been presented at the following venues:
 
 - [Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023: 📊 [**Slides**](https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=nmtHeRkl850)
-- [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=iYLxgTRe8TU)
+- [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=iYLxgTRe8TU)  
+- 2025 January PyDSL 2.0 Announcement: 🎞️[**Video**](https://youtu.be/b6Q-KgqCSoU)
 
 # Usage
 
