@@ -192,3 +192,7 @@ hatch fmt -f
 > DO NOT RUN `hatch fmt` WITHOUT THE `-f` FLAG! This will cause unsafe changes which breaks any test or examples that uses docstring directives.
 
 If you do not have Hatch, you can also install and use Python formatters such as `black` or `ruff`.
+
+## Polymorphous
+
+PyDSL is capable of activating polyhedral code generation.  The polyhedral source code is [open-sourced](https://github.com/kaitingwang/llvm-project/commit/9697b2a8c21c419b9d1a23760e4565b512889a3f).
