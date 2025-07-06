@@ -200,11 +200,10 @@ PyDSL is capable of activating polyhedral code generation.  The polyhedral sourc
 1) git clone https://github.com/kaitingwang/llvm-project.git
 2) git checkout -b my-own-branch origin/polymorphous-ipdps2025-submission
 3) build pluto tag 0.12.0 or 0.13.0 since Polymorphous uses the same cloog-isl as pluto
-4) create a symbolic link from pluto's cloog-isl into your llvm-project directory (cd llvm-project; ln -s /where/my/pluto-0.13.0/cloog-isl cloog-isl)
-5) update file mlir/lib/Dialect/Affine/Transforms/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl 
-6) update file mlir/lib/Dialect/Affine/Utils/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl
-7) inside the llvm-project directory, create a build directory
-8) cd build; cmake -G "Unix Makefiles" ../llvm -DLLVM_ENABLE_PROJECTS="mlir" -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
-9) make -j4 mlir-opt
-10) make -j4 mlir-affine-validator
+4) update file mlir/lib/Dialect/Affine/Transforms/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl within the pluto directory
+5) update file mlir/lib/Dialect/Affine/Utils/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl within the pluto directory
+6) inside the llvm-project directory, create a build directory
+7) cd build; cmake -G "Unix Makefiles" ../llvm -DLLVM_ENABLE_PROJECTS="mlir" -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
+8) make -j4 mlir-opt
+9) make -j4 mlir-affine-validator
 ```
