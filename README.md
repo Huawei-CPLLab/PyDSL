@@ -198,12 +198,13 @@ If you do not have Hatch, you can also install and use Python formatters such as
 PyDSL is capable of activating polyhedral code generation.  The polyhedral source code is [open-sourced](https://github.com/kaitingwang/llvm-project/commit/271dfcb18aa1154323d1c71332a87017c72a865c).  Below is the build instruction:
 ```sh
 1) git clone https://github.com/kaitingwang/llvm-project.git
-2) git branch -b my-own-branch origin/polymorphous-ipdps2025-submission
-3) build or download pre-built cloog-isl and place it inside the llvm-project directory
-4) Open the file llvm-project/mlir/lib/Dialect/Affine/Transforms/CMakeLists.txt, edit lines 4 and 5 based on the path of your cloog-isl 
-6) Open the file llvm-project/mlir/lib/Dialect/Affine/Utils/CMakeLists.txt, edit lines 4 and 5 based on the path of your cloog-isl
-7) Inside the llvm-project directory, create a build directory
-8) cmake -G "Unix Makefiles" ../llvm -DLLVM_ENABLE_PROJECTS="mlir" -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
+2) git checkout -b my-own-branch origin/polymorphous-ipdps2025-submission
+3) build pluto tag 0.12.0 or 0.13.0 since Polymorphous uses the same cloog-isl as pluto
+4) create a symbolic link from pluto's cloog-isl into your llvm-project directory (cd llvm-project; ln -s /where/my/pluto-0.13.0/cloog-isl cloog-isl)
+5) update file mlir/lib/Dialect/Affine/Transforms/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl 
+6) update file mlir/lib/Dialect/Affine/Utils/CMakeLists.txt, edit lines 4 and 5 to the path of your cloog-isl
+7) inside the llvm-project directory, create a build directory
+8) cd build; cmake -G "Unix Makefiles" ../llvm -DLLVM_ENABLE_PROJECTS="mlir" -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
 9) make -j4 mlir-opt
 10) make -j4 mlir-affine-validator
 ```
