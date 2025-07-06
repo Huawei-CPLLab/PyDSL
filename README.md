@@ -206,4 +206,5 @@ PyDSL is capable of activating polyhedral code generation.  The polyhedral sourc
 7) cd build; cmake -G "Unix Makefiles" ../llvm -DLLVM_ENABLE_PROJECTS="mlir" -DLLVM_TARGETS_TO_BUILD=host -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
 8) make -j4 mlir-opt
 9) make -j4 mlir-affine-validator
+10) tests are inside mlir/test/Polymorphous. You may find a readme file in there.
 ```
