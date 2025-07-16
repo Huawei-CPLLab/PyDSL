@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 import mlir.ir as mlir
 import numpy
 from mlir.dialects import affine, memref
-from mlir.ir import MemRefType, OpView, Value
+from mlir.ir import (
+    DenseI64ArrayAttr,
+    MemRefType,
+    OpView,
+    StridedLayoutAttr,
+    Value,
+)
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
 from pydsl.macro import CallMacro, Compiled, Evaluated
@@ -18,6 +24,7 @@ from pydsl.protocols import SubtreeOut, ToMLIRBase, lower
 from pydsl.type import (
     Index,
     Lowerable,
+    Slice,
     SupportsIndex,
     Tuple,
     lower_flatten,
@@ -33,7 +40,8 @@ DYNAMIC: Final = -9223372036854775808
 # used for the virtual static-typing in PyDSL
 Dynamic: Final = -9223372036854775808
 
-RawRMRD: typing.TypeAlias = tuple[c_void_p | int]
+RawRMRD: typing.TypeAlias = "CTypeTree"
+RuntimeMemrefShape = list[int | Value]
 
 # based on example in PEP 646: https://peps.python.org/pep-0646/
 DType = typing.TypeVar("DType")
@@ -111,13 +119,6 @@ class RankedMemRefDescriptor:
 
         return len(self.shape)
 
-    def assert_support(self, cls: type["MemRef"]) -> None:
-        if not (cls.shape == self.shape):
-            raise TypeError(
-                f"RankedMemRefDescriptor {self.__qualname__} does not match "
-                f"{cls.__qualname__}"
-            )
-
     def out_CType_of_MemRef(cls: type["MemRef"]) -> tuple:
         return (RankedMemRefDescriptor.generate_struct(cls.rank()),)
 
@@ -137,8 +138,8 @@ class RankedMemRefDescriptor:
     def from_CType(cls, ct: "CTypeTree") -> "RankedMemRefDescriptor":
         allo, align, offset, shape, strides = ct
         return RankedMemRefDescriptor(
-            allocated_ptr=allo,
-            aligned_ptr=align,
+            allocated_ptr=c_void_p(allo),
+            aligned_ptr=c_void_p(align),
             offset=offset,
             shape=tuple(shape),
             strides=tuple(strides),
@@ -151,11 +152,19 @@ class UsesRMRD:
     down to a ranked MemRef descriptor in LLVM C calling convention.
 
     This mostly exists to reduce code duplication.
+
+    strides == None indicates that the default layout is used.
+    That is, row major order.
     """
 
-    # These fields must be present for this to be used.
+    # These fields must be present for this superclass to be used.
+    # The values of shape and strides are mostly only used for type
+    # checking, i.e. making sure a compatible ndarray was passed in.
+    # len(shape), element_type, and offset are actually used.
     shape: tuple[int]
     element_type: Lowerable
+    offset: int
+    strides: tuple[int] | None
 
     @classmethod
     def CType(cls) -> tuple[mlir.Type]:
@@ -180,8 +189,7 @@ class UsesRMRD:
             case tuple() | list():
                 raise TypeError(
                     f"{type(pyval)} cannot be casted into a "
-                    f"{cls.__qualname__}. Supported types include "
-                    f"numpy.ndarray"
+                    f"{cls.__qualname__}. Supported types include numpy.ndarray"
                 )
             case numpy.ndarray():
                 return cls._ndarray_to_CType(pyval)
@@ -195,14 +203,100 @@ class UsesRMRD:
 
     @classmethod
     def from_CType(cls, ct: "CTypeTree") -> numpy.ndarray:
+        # This requires element_type to be representable with a single ctypes element
         rmd = RankedMemRefDescriptor.from_CType(ct)
+        element_ctype = cls.element_type.CType()[0]
+        element_size = ctypes.sizeof(element_ctype)
+        ptr = rmd.aligned_ptr  # No nice way to do this in one line it seems
+        ptr.value += rmd.offset * element_size
 
-        return numpy.ctypeslib.as_array(
-            # This requires element_type to be representable with a single
-            # ctypes element
-            ctypes.cast(rmd.aligned_ptr, POINTER(cls.element_type.CType()[0])),
-            shape=rmd.shape,
+        max_size = (
+            sum((rmd.shape[i] - 1) * rmd.strides[i] for i in range(rmd.rank()))
+            + 1
         )
+        byte_strides = [s * element_size for s in rmd.strides]
+        # Load as a 1D array first, then apply the correct shape and strides
+        flat_arr = numpy.ctypeslib.as_array(
+            ctypes.cast(ptr, POINTER(element_ctype)), shape=(max_size,)
+        )
+        return numpy.lib.stride_tricks.as_strided(
+            flat_arr, shape=rmd.shape, strides=byte_strides
+        )
+
+    @classmethod
+    def same_shape(cls, x: numpy.ndarray) -> bool:
+        """
+        Returns true if x's shape is the same as the MemRef's.
+        """
+        return len(cls.shape) == len(x.shape) and all([
+            x_sz == cls_sz or cls_sz == DYNAMIC  # "?" accepts any shape
+            for x_sz, cls_sz in zip(x.shape, cls.shape)
+        ])
+
+    @classmethod
+    def same_strides(cls, x: numpy.ndarray) -> bool:
+        """
+        Returns true if x's strides are the same as the MemRef's.
+        """
+        if cls.strides is None:
+            # If default layout, make sure ndarray is also row-major order
+            return x.flags["C_CONTIGUOUS"]
+        else:
+            # If we actually have a strided layout, check if it's
+            # compatible with the ndarray's strides
+            return len(cls.strides) == len(x.strides) and all([
+                x_s == cls_s * x.itemsize or cls_s == DYNAMIC
+                for x_s, cls_s in zip(x.strides, cls.strides)
+            ])
+
+    @classmethod
+    def _ndarray_to_CType(cls, a: numpy.ndarray) -> RawRMRD:
+        ndtype = cls.element_type.CType()
+        if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
+            raise TypeError(
+                f"The element type of a {cls.__qualname__} cannot be "
+                f"composite CType"
+            )
+
+        if (actual_dt := numpy.ctypeslib.as_ctypes_type(a.dtype)) is not (
+            expected_dt := ndtype[0]
+        ):
+            raise TypeError(
+                f"{cls.__qualname__} expects ndarray with dtype {expected_dt}, "
+                f"got {actual_dt}"
+            )
+
+        if not cls.same_shape(a):
+            raise TypeError(
+                f"attempted to pass array with shape {a.shape} into a MemRef "
+                f"of shape {cls.shape}"
+            )
+
+        if not cls.same_strides(a):
+            raise TypeError(
+                f"attempted to pass array with strides {a.strides} into a MemRef "
+                f"with strides {cls.strides}. The array has itemsize {a.itemsize}. "
+                f"The strides of the array should be {a.itemsize} times the strides "
+                f"of the MemRef."
+            )
+
+        act_offset = cls.offset if cls.offset != DYNAMIC else 0
+        # No nice way to do this in one line it seems
+        act_ptr = a.ctypes.data_as(c_void_p)
+        act_ptr.value -= act_offset * a.itemsize
+
+        # Actual shape and strides are determined by shape and strides of ndarray.
+        # We throw an error earlier if they don't match the shape and
+        # strides of this class.
+        rmd = RankedMemRefDescriptor(
+            allocated_ptr=a.ctypes.data_as(c_void_p),
+            aligned_ptr=act_ptr,
+            offset=act_offset,
+            shape=a.shape,
+            strides=[s // a.itemsize for s in a.strides],
+        )
+
+        return rmd.as_CType()
 
     @classmethod
     def PolyCType(cls) -> tuple[mlir.Type]:
@@ -231,53 +325,11 @@ class UsesRMRD:
     def rank(cls) -> int:
         return len(cls.shape)
 
-    @classmethod
-    def same_shape(cls, x: numpy.ndarray) -> bool:
-        """
-        Returns true if x's shape is the same as the MemRef's
-        """
-        return all([
-            xi == clsi or clsi == DYNAMIC  # "?" accepts any shape
-            for xi, clsi in zip(x.shape, cls.shape, strict=False)
-        ])
-
-    @classmethod
-    def _ndarray_to_CType(cls, a: numpy.ndarray) -> RawRMRD:
-        ndtype = cls.element_type.CType()
-        if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
-            raise TypeError(
-                f"The element type of a {cls.__qualname__} cannot be "
-                f"composite CType"
-            )
-
-        if (actual_dt := numpy.ctypeslib.as_ctypes_type(a.dtype)) is not (
-            expected_dt := ndtype[0]
-        ):
-            raise TypeError(
-                f"{cls.__qualname__} expect ndarray with dtype {expected_dt}, "
-                f"got {actual_dt}"
-            )
-
-        if not cls.same_shape(a):
-            raise TypeError(
-                f"attempted to pass array with shape {a.shape} into a MemRef "
-                f"of shape {cls.shape}"
-            )
-
-        rmd = RankedMemRefDescriptor(
-            allocated_ptr=a.ctypes.data_as(c_void_p),
-            aligned_ptr=a.ctypes.data_as(c_void_p),
-            offset=0,
-            shape=a.shape,
-            strides=[s // a.strides[-1] for s in a.strides],
-        )
-
-        return rmd.as_CType()
-
 
 class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     """
-    TODO: this MemRef abstraction currently only supports ranked MemRefs.
+    TODO: this MemRef abstraction currently only supports ranked MemRefs and
+    only StridedLayout and default layout.
 
     TODO: the element types (i.e. DType) allowed by MLIR's MemRef is currently
     hard-coded and constrained to int, float, index, complex, vector, and other
@@ -305,9 +357,14 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     bytes.
     """
 
+    # Only strides is allowed to be None. If anything else remains None,
+    # something has gone wrong.
     value: Value
     shape: tuple[int] = None
     element_type: Lowerable = None
+    offset: int = None
+    strides: tuple[int] | None = None
+
     _default_subclass_name = "AnnonymousMemRefSubclass"
     _supported_mlir_type = [
         mlir.IntegerType,
@@ -321,11 +378,28 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     @staticmethod
     @cache
     def class_factory(
-        shape: tuple[int], element_type, name=_default_subclass_name
+        shape: tuple[int],
+        element_type,
+        *,
+        offset: int = 0,
+        strides: tuple[int] | None = None,
+        name=_default_subclass_name,
     ):
         """
-        Create a new subclass of MemRef dynamically with the specified
-        dimensions and type
+        Create a new subclass of MemRef with the specified dimensions and type.
+
+        If strides is None, a MemRef with the default layout will be created.
+        See https://mlir.llvm.org/docs/Dialects/Builtin/#layout.
+        If strides is not None, the layout will be a StridedLayout specified
+        by offset and strides.
+        Note that in this case, strides are absolute, not relative to the
+        next dimension.
+        For example, MemRef.class_factory((4, 16), F32) and
+        MemRef.class_factory((4, 16), F32, strides=(16, 1)) return MemRef types with
+        the same indexing scheme (although technically, MLIR considers them to
+        be different layouts, since the default layout is implicitly an
+        affine map layout).
+        General affine map layouts are currently not supported.
         """
         # TODO: this check cannot be done right now because types can't be
         # lowered outside of MLIR context
@@ -344,11 +418,24 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             {
                 "shape": tuple(shape),
                 "element_type": element_type,
+                "offset": int(offset),
+                "strides": None if strides is None else tuple(strides),
             },
         )
 
     # Convenient alias
     get = class_factory
+
+    @classmethod
+    def get_fully_dynamic(cls, element_type, rank: int):
+        """
+        Quick alias for returning a MemRef type where shape,
+        offset, and strides are all dynamic.
+        """
+        dyn_list = tuple([DYNAMIC] * rank)
+        return cls.class_factory(
+            dyn_list, element_type, offset=DYNAMIC, strides=dyn_list
+        )
 
     def __init__(self, rep: OpView | Value) -> None:
         mlir_element_type = lower_single(self.element_type)
@@ -372,9 +459,33 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         ]):
             raise TypeError(
                 f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
-                f"x{lower_single(self.element_type)}, got OpView with shape "
+                f"x{lower_single(self.element_type)}, got representation with shape "
                 f"{'x'.join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
+            )
+
+        cls_is_strided = self.strides is not None
+        rep_is_strided = isinstance(rep.type.layout, StridedLayoutAttr)
+
+        if cls_is_strided and not rep_is_strided:
+            raise TypeError(
+                "MemRef has strided layout but representation does not"
+            )
+
+        if not cls_is_strided and rep_is_strided:
+            raise TypeError(
+                "representation has strided layout but MemRef does not"
+            )
+
+        if cls_is_strided and not all([
+            self.offset == rep.type.layout.offset,
+            self.strides == tuple(rep.type.layout.strides),
+        ]):
+            raise TypeError(
+                f"expected layout with offset = {self.offset},"
+                f"strides = {self.strtides}, got representation with"
+                f"offset = {rep.type.layout.offset}, strides = "
+                f"{tuple(rep.type.layout.strides)}"
             )
 
         self.value = rep
@@ -397,34 +508,44 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             key = AffineMapExprWalk.compile(slice, visitor.scope_stack)
             return cons_affine_load(key)
 
-        key = visitor.visit(slice)
+        key_st = visitor.visit(slice)
 
-        match key:
-            case SupportsIndex():
-                key = Index(key)
-                return self.element_type(
-                    memref.LoadOp(lower_single(self), [lower_single(key)])
-                )
+        if isinstance(key_st, AffineMapExpr):
+            return cons_affine_load(key_st)
 
-            case Tuple():
-                key = [Index(k) for k in key.value]
-                return self.element_type(
-                    memref.LoadOp(lower_single(self), lower_flatten(key))
-                )
+        key_list = subtree_to_slices(visitor, key_st)
+        dim = self.rank()
 
-            case AffineMapExpr():
-                return cons_affine_load(key)
+        if len(key_list) == dim and all(
+            isinstance(key, SupportsIndex) for key in key_list
+        ):
+            key_list = lower_flatten([Index(key) for key in key_list])
+            return self.element_type(
+                memref.LoadOp(lower_single(self), key_list)
+            )
 
-            case _:
-                raise TypeError(
-                    f"{type(key)} cannot be used to index a MemRef"
-                )
+        lo_list, size_list, step_list = slices_to_mlir_format(
+            key_list, self.runtime_shape
+        )
+        result_type = self.get_fully_dynamic(self.element_type, dim)
+        dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
+        rep = memref.SubViewOp(
+            result_type.lower_class()[0],
+            lower_single(self),
+            lo_list,
+            size_list,
+            step_list,
+            dynamic_i64_attr,
+            dynamic_i64_attr,
+            dynamic_i64_attr,
+        )
+        return result_type(rep)
 
     def on_setitem(
         self: typing.Self,
         visitor: "ToMLIRBase",
         slice: ast.AST,
-        value: ast.AST | SubtreeOut,
+        value: ast.AST,
     ) -> SubtreeOut:
         value = self.element_type(visitor.visit(value))
 
@@ -441,30 +562,29 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             key = AffineMapExprWalk.compile(slice, visitor.scope_stack)
             return cons_affine_store(key)
 
-        key = visitor.visit(slice)
+        key_st = visitor.visit(slice)
 
-        match key:
-            case SupportsIndex():
-                key = Index(key)
-                return memref.StoreOp(
-                    lower_single(value),
-                    lower_single(self),
-                    [lower_single(key)],
-                )
+        if isinstance(key_st, AffineMapExpr):
+            return cons_affine_store(key_st)
 
-            case Tuple():
-                key = [Index(k) for k in key.value]
-                return memref.StoreOp(
-                    lower_single(value), lower_single(self), lower_flatten(key)
-                )
+        key_list = subtree_to_slices(visitor, key_st)
+        dim = self.rank()
 
-            case AffineMapExpr():
-                return cons_affine_store(key)
+        if len(key_list) == dim and all(
+            isinstance(key, SupportsIndex) for key in key_list
+        ):
+            key_list = lower_flatten([Index(key) for key in key_list])
+            return memref.StoreOp(
+                lower_single(value), lower_single(self), key_list
+            )
 
-            case _:
-                raise TypeError(
-                    f"{type(key)} cannot be used to index a MemRef"
-                )
+        if len(key_list) != dim:
+            raise IndexError(
+                f"number of indices must be the same as the rank of a MemRef when storing: `"
+                f"rank is {dim}, but number of indices is {len(key_list)}"
+            )
+
+        raise TypeError("cannot store to a slice of a MemRef")
 
     @classmethod
     def on_class_getitem(
@@ -501,129 +621,36 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
                 e.add_note(f"hint: class name is {clsname}")
             raise e
 
-        return (
-            MemRefType.get(list(cls.shape), lower_single(cls.element_type)),
-        )
-
-    @classmethod
-    def CType(cls) -> tuple[mlir.Type]:
-        # TODO: this assumes that the shape is ranked
-        return RankedMemRefDescriptor.CType_of_MemRef(cls)
-
-    @classmethod
-    def to_CType(
-        cls, pyval: typing.Union[tuple, list, numpy.ndarray, "SupportsRMRD"]
-    ) -> RawRMRD:
-        """
-        Accepts any value that is numpy.ndarray, tuple, list, or convertible
-        to RankedMemRefDescriptor.
-
-        The elements are restricted as such:
-        - if the expected element's CType is int or float, then the input must
-          be int or float, respectively
-        - if the expected element's CType is a tuple of CTypes, then an error
-          is thrown
-        - if the expected element's CType is a struct, then
-        - NOTE: string list is not supported
-        """
-        match pyval:
-            case tuple() | list():
-                raise TypeError(
-                    f"{type(pyval)} cannot be casted into a MemRef. "
-                    f"Supported types include numpy.ndarray"
-                )
-            case numpy.ndarray():
-                return cls._ndarray_to_CType(pyval)
-            case SupportsRMRD():
-                return pyval.RankedMemRefDescriptor(cls).as_CType()
-            case _:
-                raise TypeError(
-                    f"{type(pyval)} cannot be casted into a "
-                    f"{cls.__qualname__}"
-                )
-
-    @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> numpy.ndarray:
-        rmd = RankedMemRefDescriptor.from_CType(ct)
-
-        return numpy.ctypeslib.as_array(
-            # This requires element_type to be representable with a single
-            # ctypes element
-            ctypes.cast(rmd.aligned_ptr, POINTER(cls.element_type.CType()[0])),
-            shape=rmd.shape,
-        )
-
-    @classmethod
-    def PolyCType(cls) -> tuple[mlir.Type]:
-        # TODO: this assumes that the shape is ranked
-        return (c_void_p,)
-
-    @classmethod
-    def to_PolyCType(
-        cls, pyval: typing.Union[tuple, list, numpy.ndarray, "SupportsRMRD"]
-    ) -> RawRMRD:
-        # the 0th index is the pointer to the memory location, which is the
-        # only thing Poly accepts
-        return (cls.to_CType(pyval)[0],)
-
-    @classmethod
-    def from_PolyCType(cls, ct: "CTypeTree") -> numpy.ndarray:
-        raise RuntimeError(
-            "PolyCType memref pointers cannot be converted into NumPy NDArray"
-        )
-
-    @classmethod
-    def _arraylike_to_CType(cls, li) -> RawRMRD:
-        return cls._ndarray_to_CType(numpy.asarray(li))
-
-    @classmethod
-    def rank(cls) -> int:
-        return len(cls.shape)
-
-    @classmethod
-    def same_shape(cls, x: numpy.ndarray) -> bool:
-        """
-        Returns true if x's shape is the same as the MemRef's
-        """
-        if len(x.shape) != len(cls.shape):
-            return False
-
-        return all([
-            xi == clsi or clsi == DYNAMIC  # "?" accepts any shape
-            for xi, clsi in zip(x.shape, cls.shape)
-        ])
-
-    @classmethod
-    def _ndarray_to_CType(cls, a: numpy.ndarray) -> RawRMRD:
-        ndtype = cls.element_type.CType()
-        if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
-            raise TypeError(
-                "The element type of a MemRef cannot be composite CType"
+        if cls.strides is None:
+            return (
+                MemRefType.get(
+                    list(cls.shape), lower_single(cls.element_type)
+                ),
+            )
+        else:
+            layout = StridedLayoutAttr.get(cls.offset, list(cls.strides))
+            return (
+                MemRefType.get(
+                    list(cls.shape), lower_single(cls.element_type), layout
+                ),
             )
 
-        if (actual_dt := numpy.ctypeslib.as_ctypes_type(a.dtype)) is not (
-            expected_dt := ndtype[0]
-        ):
-            raise TypeError(
-                f"MemRef expect ndarray with dtype {expected_dt}, got "
-                f"{actual_dt}"
+    @property
+    def runtime_shape(self) -> RuntimeMemrefShape:
+        """
+        Return the shape of the memref as it exists at runtime.
+
+        If one of the dimension sizes is dynamic, a memref.dim operator is
+        returned instead for that dimension.
+        """
+        return [
+            (
+                d
+                if d != DYNAMIC
+                else memref.DimOp(lower_single(self), lower_single(Index(i)))
             )
-
-        if not cls.same_shape(a):
-            raise TypeError(
-                f"attempted to pass array with shape {a.shape} into a MemRef "
-                f"of shape {cls.shape}"
-            )
-
-        rmd = RankedMemRefDescriptor(
-            allocated_ptr=a.ctypes.data_as(c_void_p),
-            aligned_ptr=a.ctypes.data_as(c_void_p),
-            offset=0,
-            shape=a.shape,
-            strides=[s // a.strides[-1] for s in a.strides],
-        )
-
-        return rmd.as_CType()
+            for i, d in enumerate(self.shape)
+        ]
 
 
 # Convenient alias
@@ -645,52 +672,166 @@ def verify_memory_type(mtype: type[MemRef]):
         )
 
 
-def verify_dynamics_val(mtype: type[MemRef], dynamics_val: Tuple) -> None:
-    dynamics_val = lower(dynamics_val)
+def verify_dynamic_sizes(mtype: type[MemRef], dynamic_sizes: Tuple) -> None:
+    dynamic_sizes = lower(dynamic_sizes)
 
-    if not isinstance(dynamics_val, cabc.Iterable):
-        raise TypeError(f"{repr(dynamics_val)} is not iterable")
+    # TODO: does this check do anything, since lower returns a tuple?
+    if not isinstance(dynamic_sizes, cabc.Iterable):
+        raise TypeError(f"{repr(dynamic_sizes)} is not iterable")
 
-    if (actual_dyn := len(dynamics_val)) != (
+    if (actual_dyn := len(dynamic_sizes)) != (
         target_dyn := mtype.shape.count(DYNAMIC)
     ):
         raise ValueError(
             f"MemRef has {target_dyn} dynamic dimensions to be filled, "
-            f"but alloca received {actual_dyn}"
+            f"but alloc/alloca received {actual_dyn}"
         )
+
+
+def verify_dynamic_symbols(
+    mtype: type[MemRef], dynamic_symbols: Tuple
+) -> None:
+    dynamic_symbols = lower(dynamic_symbols)
+
+    # TODO: does this check do anything, since lower returns a tuple?
+    if not isinstance(dynamic_symbols, cabc.Iterable):
+        raise TypeError(f"{repr(dynamic_symbols)} is not iterable")
+
+    if (actual_dyn := len(dynamic_symbols)) != (
+        target_dyn := 0
+        if mtype.strides is None
+        else mtype.strides.count(DYNAMIC)
+    ):
+        raise ValueError(
+            f"MemRef has {target_dyn} dynamic strides to be filled, "
+            f"but alloc/alloca received {actual_dyn}"
+        )
+
+
+def _alloc_generic(
+    visitor: ToMLIRBase,
+    mtype: Compiled,
+    dynamic_sizes: Compiled,
+    dynamic_symbols: Compiled,
+    alloc_func: cabc.Callable[..., SubtreeOut],
+) -> SubtreeOut:
+    """
+    Does the logic required for alloc/alloca. It was silly having
+    two functions that differed by only one character. alloc_func
+    should be memref.alloc or memref.alloca.
+    """
+    if dynamic_sizes is None:
+        dynamic_sizes = Tuple.from_values(visitor, *())
+
+    if dynamic_symbols is None:
+        dynamic_symbols = Tuple.from_values(visitor, *())
+
+    verify_memory_type(mtype)
+
+    if mtype.strides is not None:
+        raise NotImplementedError(
+            "allocating MemRefs with a strided layout is currently"
+            "not supported, since there seems to be no way to lower"
+            "the resulting MLIR to LLVMIR. Allocate a MemRef with"
+            "consecutive memory instead"
+        )
+
+    verify_dynamic_sizes(mtype, dynamic_sizes)
+    verify_dynamic_symbols(mtype, dynamic_symbols)
+    dynamic_sizes = [lower_single(Index(i)) for i in lower(dynamic_sizes)]
+    dynamic_symbols = [lower_single(Index(i)) for i in lower(dynamic_symbols)]
+
+    return mtype(
+        alloc_func(lower_single(mtype), dynamic_sizes, dynamic_symbols)
+    )
 
 
 @CallMacro.generate()
 def alloca(
-    visitor: ToMLIRBase, mtype: Compiled, dynamics_val: Compiled = None
+    visitor: ToMLIRBase,
+    mtype: Compiled,
+    dynamic_sizes: Compiled = None,
+    dynamic_symbols: Compiled = None,
 ) -> SubtreeOut:
-    if dynamics_val is None:
-        dynamics_val = Tuple.from_values(visitor, *())
-
-    verify_memory_type(mtype)
-    verify_dynamics_val(mtype, dynamics_val)
-    dynamics_val = [lower_single(Index(i)) for i in lower(dynamics_val)]
-
-    # TODO: not sure what the third argument do
-    return mtype(memref.alloca(lower_single(mtype), dynamics_val, []))
+    return _alloc_generic(
+        visitor, mtype, dynamic_sizes, dynamic_symbols, memref.alloca
+    )
 
 
 @CallMacro.generate()
 def alloc(
-    visitor: ToMLIRBase, mtype: Compiled, dynamics_val: Compiled = None
+    visitor: ToMLIRBase,
+    mtype: Compiled,
+    dynamic_sizes: Compiled = None,
+    dynamic_symbols: Compiled = None,
 ) -> SubtreeOut:
-    if dynamics_val is None:
-        dynamics_val = Tuple.from_values(visitor, *())
-
-    verify_memory_type(mtype)
-    verify_dynamics_val(mtype, dynamics_val)
-    dynamics_val = [lower_single(Index(i)) for i in lower(dynamics_val)]
-
-    # TODO: not sure what the third argument do
-    return mtype(memref.alloc(lower_single(mtype), dynamics_val, []))
+    return _alloc_generic(
+        visitor, mtype, dynamic_sizes, dynamic_symbols, memref.alloc
+    )
 
 
 @CallMacro.generate()
 def dealloc(visitor: ToMLIRBase, mem: Evaluated) -> None:
     verify_memory(mem)
     return memref.dealloc(lower_single(mem))
+
+
+def slices_to_mlir_format(
+    key_list: list[Slice | SupportsIndex], runtime_shape: RuntimeMemrefShape
+) -> tuple[list[Value], list[Value], list[Value]]:
+    """
+    Given a list of slices/indices, converts the slices to MLIR format and
+    infers missing bounds/dimensions based on the dimensions of the tensor/memref.
+    3 lists will be returned: [offsets], [sizes], [strides], which can be
+    passed to MLIR functions like tensor.extract_slice and memref.subview.
+    If key_list is shorter than runtime_shape, assume the entirety of the
+    remaining dimensions should be included ([:]).
+    There is currently no bounds checking!
+    Negative strides or indices are not supported (even though [3:-2:-1] can
+    be valid in normal Python) and result in undefined behaviour!
+    """
+
+    dim = len(runtime_shape)
+
+    if len(key_list) > dim:
+        raise IndexError(
+            f"number of subscripts {len(key_list)} is greater than number"
+            f"of dimensions {dim}"
+        )
+
+    while len(key_list) < dim:
+        key_list.append(Slice(None, None, None))
+
+    lo_list = []
+    size_list = []
+    step_list = []
+
+    for i in range(dim):
+        key = key_list[i]
+        if isinstance(key, SupportsIndex):
+            lo_list.append(lower_single(Index(key)))
+            size_list.append(lower_single(Index(1)))
+            step_list.append(lower_single(Index(1)))
+        elif isinstance(key, Slice):
+            lo, size, step = key.get_params(Index(runtime_shape[i]))
+            lo_list.append(lower_single(lo))
+            size_list.append(lower_single(size))
+            step_list.append(lower_single(step))
+        else:
+            raise TypeError(f"{type(key)} cannot be used as a subscript")
+
+    return (lo_list, size_list, step_list)
+
+
+def subtree_to_slices(
+    visitor: "ToMLIRBase", key: SubtreeOut
+) -> list[Slice | SupportsIndex]:
+    match key:
+        case SupportsIndex():
+            return [key]
+        case Tuple():
+            return list(key.as_iterable(visitor))
+        case Slice():
+            return [key]
+        case _:
+            raise TypeError(f"{type(key)} cannot be used as a subscript")

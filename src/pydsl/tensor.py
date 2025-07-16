@@ -1,28 +1,36 @@
 import collections.abc as cabc
+import ast
 import typing
-from ctypes import c_void_p
 from functools import cache
 from pydsl.macro import CallMacro, Compiled, Evaluated
 
-from mlir.dialects import arith
 import mlir.dialects.tensor as mlir_tensor
 import mlir.ir as mlir
-from mlir.ir import (
-    OpView,
-    RankedTensorType,
-    Value,
+from mlir.ir import DenseI64ArrayAttr, OpView, RankedTensorType, Value
+import mlir.dialects._tensor_ops_gen as tensor_ops_gen
+
+from pydsl.memref import (
+    UsesRMRD,
+    RuntimeMemrefShape,
+    slices_to_mlir_format,
+    subtree_to_slices,
 )
 
-from pydsl.memref import UsesRMRD
-from pydsl.type import Index, Lowerable, lower_single, Tuple
-from pydsl.protocols import SubtreeOut, ToMLIRBase, lower
+from pydsl.type import (
+    Index,
+    Lowerable,
+    lower,
+    lower_flatten,
+    lower_single,
+    SupportsIndex,
+    Tuple,
+)
+from pydsl.protocols import SubtreeOut, ToMLIRBase
 
 DYNAMIC = -9223372036854775808
 
 # used for the virtual static-typing in PyDSL
 Dynamic = typing.Literal[-9223372036854775808]
-RawRMRD = tuple[c_void_p | int]
-RuntimeTensorShape = list[int | Value]
 
 # based on example in PEP 646: https://peps.python.org/pep-0646/
 # TODO: these currently are unused
@@ -32,14 +40,14 @@ Shape = typing.TypeVarTuple("Shape")
 
 class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     """
-    TODO: this Tensor type is fairly bare-bone right now. It's meant mostly
-    to demonstrate other operations. It's also limited to ranked versions
-    of rank type for now
+    TODO: this Tensor type is limited to ranked versions for now.
     """
 
     value: Value
     shape: tuple[int] = None
     element_type: Lowerable = None
+    offset: int = None
+    strides: tuple[int] = None
     _default_subclass_name = "AnnonymousTensorSubclass"
     _supported_mlir_type = [
         mlir.IntegerType,
@@ -76,6 +84,9 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             {
                 "shape": tuple(shape),
                 "element_type": element_type,
+                # tensor seems to get lowererd to memref<..., strided<[?, ?, ?], offset: ?>>
+                "offset": DYNAMIC,
+                "strides": tuple([DYNAMIC] * len(shape)),
             },
         )
 
@@ -133,22 +144,141 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     # TODO: potential dead code. MLIR already compute all the dims for us if we
     # pass the input tensor as the output tensor as well. I feel this can still
     # be useful if the end PyDSL user wants to get the shape though.
+    # Update: on_getitem and on_setitem use this function now.
     @property
-    def runtime_shape(self) -> RuntimeTensorShape:
+    def runtime_shape(self) -> RuntimeMemrefShape:
         """
         Return the shape of the tensor as it exists at runtime.
 
-        If one of the dimension size is dynamic, a tensor.dim operator is
+        If one of the dimension sizes is dynamic, a tensor.dim operator is
         returned instead for that dimension.
         """
         return [
             (
                 d
                 if d != DYNAMIC
-                else mlir_tensor.DimOp(self.value, lower_single(Index(i)))
+                else mlir_tensor.DimOp(
+                    lower_single(self), lower_single(Index(i))
+                )
             )
             for i, d in enumerate(self.shape)
         ]
+
+    def on_getitem(
+        self: typing.Self, visitor: "ToMLIRBase", slice: ast.AST
+    ) -> SubtreeOut:
+        key_list = subtree_to_slices(visitor, visitor.visit(slice))
+        dim = len(self.shape)
+
+        # If all indices are integers, not slices, do an extract op
+        if len(key_list) == dim and all(
+            isinstance(key, SupportsIndex) for key in key_list
+        ):
+            key_list = lower_flatten([Index(key) for key in key_list])
+            rep = tensor_ops_gen.extract(lower_single(self), key_list)
+            return self.element_type(rep)
+
+        # Otherwise, do an extract_slice op
+        lo_list, size_list, step_list = slices_to_mlir_format(
+            key_list, self.runtime_shape
+        )
+
+        # We make the result a tensor with all dynamic dimensions
+        result_type = TensorFactory(tuple([DYNAMIC] * dim), self.element_type)
+        dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
+
+        rep = tensor_ops_gen.extract_slice(
+            result_type.lower_class()[0],
+            lower_single(self),
+            lo_list,
+            size_list,
+            step_list,
+            dynamic_i64_attr,
+            dynamic_i64_attr,
+            dynamic_i64_attr,
+        )
+        return result_type(rep)
+
+    def on_setitem(
+        self: typing.Self,
+        visitor: "ToMLIRBase",
+        slice: ast.AST,
+        value: ast.AST,
+    ) -> SubtreeOut:
+        value_st = visitor.visit(value)
+        key_list = subtree_to_slices(visitor, visitor.visit(slice))
+        dst_dim = len(self.shape)
+
+        # If all indices are integers, not slices, do an insert op
+        if len(key_list) == dst_dim and all(
+            isinstance(key, SupportsIndex) for key in key_list
+        ):
+            value_mlir = lower_single(self.element_type(value_st))
+            key_list = lower_flatten([Index(key) for key in key_list])
+            rep = tensor_ops_gen.insert(
+                value_mlir, lower_single(self), key_list
+            )
+            self.value = rep
+            return rep
+
+        # Otherwise, do an insert_slice op
+        lo_list, size_list, step_list = slices_to_mlir_format(
+            key_list, self.runtime_shape
+        )
+        src_dim = len(value_st.shape)
+
+        if dst_dim != src_dim:
+            raise TypeError(
+                "trying to insert_slice with tensors of different ranks"
+            )
+
+        # We make all offsets and strides dynamic
+        dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * src_dim)
+
+        # We use static dimensions for the shape of the source tensor whenever possible.
+        # This is necessary to not cause an error (can't use tensor of static shape
+        # if the op expects dynamic shape).
+        src_size_i64_attr = DenseI64ArrayAttr.get(value_st.shape)
+        size_list = [
+            size_list[i]
+            for i in range(src_dim)
+            if value_st.shape[i] == DYNAMIC
+        ]
+
+        rep = tensor_ops_gen.insert_slice(
+            lower_single(value_st),
+            lower_single(self),
+            lo_list,
+            size_list,
+            step_list,
+            dynamic_i64_attr,
+            src_size_i64_attr,
+            dynamic_i64_attr,
+        )
+        self.value = rep
+        return rep
+
+    @classmethod
+    def on_class_getitem(
+        cls, visitor: ToMLIRBase, slice: ast.AST
+    ) -> SubtreeOut:
+        # TODO: directly copied from Memref. Make a helper function somwhere
+        # to avoid duplicating code.
+        match slice:
+            case ast.Tuple(elts=elts):
+                args = [visitor.resolve_type_annotation(e) for e in elts]
+            case t:
+                args = [visitor.resolve_type_annotation(t)]
+
+        if len(args) < 2:
+            raise TypeError(
+                f"MemRef expected at least 2 Generic arguments, got {args}"
+            )
+
+        dtype = args[0]
+        shape = args[1:]
+
+        return cls.class_factory(tuple(shape), dtype)
 
 
 # Convenient alias
@@ -173,7 +303,7 @@ def verify_dynamics_val(t_type: type[Tensor], dynamics_val: Tuple) -> None:
         target_dyn := t_type.shape.count(DYNAMIC)
     ):
         raise ValueError(
-            f"Temspr has {target_dyn} dynamic dimensions to be filled, "
+            f"Tensor has {target_dyn} dynamic dimensions to be filled, "
             f"but emptyOp received {actual_dyn}"
         )
 
