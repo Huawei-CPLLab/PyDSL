@@ -1,11 +1,6 @@
-from typing import Any
-
-import pytest
-
-from pydsl.compiler import CompilationError
 from pydsl.frontend import compile
 from pydsl.type import SInt16, UInt16
-from tests.e2e.helper import compilation_failed_from
+from helper import compilation_failed_from, run
 
 
 def test_annassign():
@@ -35,3 +30,9 @@ def test_assign_implicit_type():
     mlir = assign.emit_mlir()
 
     assert r"arith.constant 5 : i16" in mlir
+
+
+if __name__ == "__main__":
+    run(test_annassign)
+    run(test_illegal_annassign)
+    run(test_assign_implicit_type)

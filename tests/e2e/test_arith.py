@@ -1,7 +1,14 @@
-import itertools
 import math
+import itertools
 
-import pytest
+from helper import (
+    f32_edges,
+    f32_isclose,
+    failed_from,
+    compilation_failed_from,
+    run,
+)
+import numpy as np
 
 from pydsl.frontend import compile
 from pydsl.math import abs as p_abs
@@ -12,15 +19,14 @@ from pydsl.type import (
     Index,
     SInt8,
     SInt64,
-    Tuple,
     UInt8,
     UInt64,
+    Tuple,
 )
-from tests.e2e.helper import compilation_failed_from, f32_edges, f32_isclose
 
 
 def test_illegal_unfit_Int_input():
-    with pytest.raises(TypeError):
+    with failed_from(TypeError):
 
         @compile(globals())
         def f(_: UInt8):
@@ -30,7 +36,7 @@ def test_illegal_unfit_Int_input():
 
 
 def test_illegal_Int_sign_input():
-    with pytest.raises(ValueError):
+    with failed_from(ValueError):
 
         @compile(globals())
         def f(_: UInt8):
@@ -117,19 +123,6 @@ def test_cast_F64_to_Floats():
         assert isinstance(f64, float)
         assert f32_isclose(i, f32)
         assert f32_isclose(i, f64)
-
-
-def test_cast_Index_to_Floats():
-    @compile(globals())
-    def cast(a: Index) -> Tuple[F32, F64]:
-        return F32(a), F64(a)
-
-    for ind in [0, 1, 5, (1 << 63) - 1]:
-        f32, f64 = cast(ind)
-        assert isinstance(f32, float)
-        assert isinstance(f64, float)
-        assert f32_isclose(ind, f32)
-        assert f32_isclose(ind, f64)
 
 
 def test_UInt8_addition():
@@ -320,7 +313,19 @@ def test_illegal_implicit():
             a + 5.2
 
 
-# TODO: unary not is not implemented for now
+def test_cast_Index_to_Floats():
+    @compile(globals())
+    def cast(a: Index) -> Tuple[F32, F64]:
+        return F32(a), F64(a)
+
+    for ind in [0, 1, 5, (1 << 63) - 1]:
+        f32, f64 = cast(ind)
+        assert isinstance(f32, float)
+        assert isinstance(f64, float)
+        assert f32_isclose(ind, f32)
+        assert f32_isclose(ind, f64)
+
+
 def test_SInt_unary():
     @compile(globals())
     def SInt_un() -> Tuple[SInt64, SInt64, SInt64, SInt64]:
@@ -330,7 +335,6 @@ def test_SInt_unary():
     assert SInt_un() == (-5, +5, abs(5), ~5)
 
 
-# TODO: unary not is not implemented for now
 def test_Number_unary():
     @compile(globals())
     def imp_un() -> Tuple[SInt64, SInt64, SInt64, SInt64]:
@@ -338,3 +342,37 @@ def test_Number_unary():
         return -a, +a, p_abs(a), ~a
 
     assert imp_un() == (-5, +5, abs(5), ~5)
+
+
+if __name__ == "__main__":
+    run(test_illegal_unfit_Int_input)
+    run(test_illegal_Int_sign_input)
+    run(test_cast_UInt8_to_Floats)
+    run(test_cast_UInt64_to_Floats)
+    run(test_cast_SInt8_to_Floats)
+    run(test_cast_SInt64_to_Floats)
+    run(test_cast_F32_to_Floats)
+    run(test_cast_F64_to_Floats)
+    run(test_UInt8_addition)
+    run(test_UInt64_addition)
+    run(test_illegal_different_sign_addition)
+    run(test_negf_F32)
+    run(test_select)
+    run(test_cmp_uint)
+    run(test_cmp_sint)
+    run(test_cmp_float)
+    run(test_cmp_chained)
+    run(test_and)
+    run(test_or)
+    run(test_not)
+    run(test_implicit_arith_UInt64_lhs)
+    run(test_implicit_arith_UInt64_rhs)
+    run(test_implicit_arith_Index_lhs)
+    run(test_implicit_arith_Index_rhs)
+    run(test_implicit_compare_UInt64_rhs)
+    run(test_implicit_compare_implicit)
+    run(test_chained_implicit)
+    run(test_illegal_implicit)
+    run(test_cast_Index_to_Floats)
+    run(test_SInt_unary)
+    run(test_Number_unary)

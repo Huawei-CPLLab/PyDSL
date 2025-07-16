@@ -4,6 +4,7 @@ from pydsl.frontend import compile
 from pydsl.affine import affine_range as arange
 from pydsl.memref import MemRef
 from pydsl.type import Index, Tuple, UInt32
+from helper import run
 
 
 def test_return_empty_tuple():
@@ -34,3 +35,8 @@ def test_return_tuple_with_memref():
 
     # in-place MemRef result should be the same as returned MemRef result
     assert (m2 == m1).all()
+
+
+if __name__ == "__main__":
+    run(test_return_empty_tuple)
+    run(test_return_tuple_with_memref)

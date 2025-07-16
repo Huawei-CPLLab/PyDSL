@@ -19,6 +19,7 @@ from mlir.ir import (
 
 from pydsl.analysis.names import BoundAnalysis, UsedAnalysis
 from pydsl.func import Function, TransformSequence
+from pydsl.type import Index
 
 # BEWARE OF WHAT YOU IMPORT HERE. IMPORTING ANYTHING SUCH AS type OR macro
 # WILL CAUSE CYCLIC ERROR, AS ALMOST EVERY MODULE IN pydsl RELIES ON compiler
@@ -46,6 +47,7 @@ from pydsl.protocols import (
 from pydsl.scope import Scope, ScopeStack
 from pydsl.type import Number, iscompiled
 from pydsl.type import Tuple as DTuple
+from pydsl.type import Slice as DSlice
 
 
 # FIXME: turn these into proper passes that return a dict
@@ -300,6 +302,12 @@ class ToMLIR(ToMLIRBase):
     def setup(self) -> None:
         self.module = None
         self.scope_stack = ScopeStack(self.f_locals)
+
+    def visit_Slice(self, node: ast.Slice):
+        lo = None if node.lower is None else Index(self.visit(node.lower))
+        hi = None if node.upper is None else Index(self.visit(node.upper))
+        step = None if node.step is None else Index(self.visit(node.step))
+        return DSlice(lo, hi, step)
 
     def visit_Tuple(self, node: ast.Tuple) -> SubtreeOut:
         return DTuple.from_values(

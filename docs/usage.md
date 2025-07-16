@@ -8,15 +8,32 @@ PyDSL is a compiler that transforms a subset of Python down to MLIR, which can t
 
 ## Syntax and semantics
 
-Syntax-wise, PyDSL is effectively a subset of Python. It introduces no new syntax, meaning if PyDSL can parse it, Python can also parse it. However, not everything written with PyDSL can be run in Python. For example, range is a function in Python, but it is a macro subclass in PyDSL. In addition, PyDSL permits variables to be used within type hints, which allows users to include MLIR dynamic dimensions in their MemRef types. This is not permitted in Python. Conversely, not everything written in Python can be run in PyDSL, even if it is within the PyDSL syntax subset. For example, PyDSL requires all arguments of a function to be type-hinted, but type-hinting is optional in Python. Translations between Python and PyDSL code requires minor modification.
+Syntax-wise, PyDSL is effectively a subset of Python.
+It introduces no new syntax, meaning if PyDSL can parse it, Python can also parse it.
+
+However, not everything written in PyDSL can be run in Python. For example, `range` is a function in Python, but it is a macro subclass in PyDSL.
+As such, import statements like `from pydsl.scf import range` will shadow Python's built-in `range` and will cause any references to `range` to break.
+In addition, PyDSL permits variables to be used within type hints, which allows users to include MLIR dynamic dimensions in their MemRef types.
+This is not permitted in Python.
+
+Conversely, not everything written in Python can be run in PyDSL, even if it's within the PyDSL syntax subset.
+For example, PyDSL requires all arguments of a function to be type-hinted, but type-hinting is optional in Python.
+
+Translation between Python and PyDSL code requires minor modification.
 
 Some aspects of PyDSL's semantics deliberately stray from Python's for the purpose of aiding user productivity. For instance, a PyDSL function's return type can be optionally unhinted, but it denotates a None type (i.e. a void return) rather than an Any type. Isolated block string literals (delimited with triple quotes `"""`) are effectively comments in Python, but is also used to capture blocks of code as input to a macro in PyDSL.
 
 ## Limitations
 
-Besides design-wise limitation on what PyDSL accepts, PyDSL is also in an early stage of development. A lot of Python constructions cannot be compiled because they are simply not implemented, such as nested functions and defining a variable inside a for loop and using it outside later. PyDSL also currently have limited error messages provided for edge cases: if you stray too far from examples shown in this documentation, you may come across cryptic MLIR error.
+Besides design-wise limitation on what PyDSL accepts, PyDSL is also in an early stage of development.
+A lot of Python constructions cannot be compiled because they are simply not implemented,
+such as nested functions and defining a variable inside a for loop and using it outside later.
+PyDSL also currently has limited error messages provided for edge cases:
+if you stray too far from examples shown in this documentation, you may come across cryptic MLIR errors.
 
-PyDSL prioritizes supporting programs which makes use of nested loops and explicit transformations, and rarely makes use of piecewise computations involving `if` statements. Most of the features implemented in PyDSL and given as example below will reflect this fact.
+PyDSL prioritizes supporting programs which make use of nested loops and explicit transformations,
+and rarely make use of piecewise computations involving `if` statements.
+Most of the features implemented in PyDSL and given as example below will reflect this fact.
 
 ## Compilation and running
 
@@ -48,7 +65,7 @@ from pydsl.type import F32, F64, Index
 Memref64 = MemRefFactory((40, 40), F64)
 
 
-@compile
+@compile()
 def hello(a: F32, b: F32) -> F32:
     d: F32 = 12.0
     l: Index = 5
@@ -201,12 +218,10 @@ The user can return tuples by type hint with `Tuple` from `pydsl.type` module.
 Currently, tuples can't be used for type hinting for variables. This is because MLIR does not have a tuple type.
 
 ```py
-from pydsl.type import Tuple
-
 from pydsl.frontend import compile
 from pydsl.scf import range
 from pydsl.memref import MemRefFactory
-from pydsl.type import F32, F64, Index
+from pydsl.type import F32, F64, Index, Tuple
 
 
 Memref64 = MemRefFactory((40, 40), F64)
@@ -243,7 +258,7 @@ module {
 }
 ```
 
-## Typing and arithmetics
+## Typing and arithmetic
 
 There are many ways to define a constant. You can define your constant by hinting a type (either through an annotated assign or through calling the type within an expression). You can also simply write a constant and leave out any typing information and have the compiler infer the type for you.
 
@@ -257,7 +272,7 @@ a: I32 = 5
 # Assign a new variable with type hinting via the type as a function
 a = I32(5)
 
-# Have the compiler evaluate the type of this constant lazily. Only works for numerical literals.
+# Have the compiler evaluate the type of this constant lazily
 a = 5 
 ```
 
@@ -281,7 +296,7 @@ i: UInt32 = 5
 f = F32(i)
 ```
 
-Casting of floats can be done to extend width, but width reduction is not supported yet. Int width extension is also not supported yet.
+Casting of Floats can be done to extend width, but width reduction is not supported yet.
 ```py
 f: F32 = 5
 fwide = F64(f)
@@ -337,7 +352,8 @@ Implementation-wise, `MemRefFactory` dynamically generates a new subclass of `Me
 
 ## Type inference
 
-PyDSL provides a preliminary type inference system to reduce the amount of times that users would need to explicitly specify a variable, improving the language ergonomics. This is only applicable to numerical literals and relies entirely on PyDSL’s type casting mechanism.
+PyDSL provides a preliminary type inference system to reduce the amount of times that users would need to explicitly specify a variable, improving the language ergonomics.
+This is only applicable to numerical literals and relies entirely on PyDSL's type casting mechanism.
 
 Whenever PyDSL comes across a numerical literal without any type hinting associated with it, PyDSL will associate it with a generic `Number` type that is not associated with any particular numerical type in MLIR. This `Number` type will temporarily hold the literal value in Python representation, and will either be casted into a concrete MLIR type (if it is used) or be eliminated (if it is not used). The specific concrete type depends on the operation performed.
 
@@ -400,33 +416,60 @@ def f(m: MemRefSingle, b: Bool):
         m[Index(0)] = UInt32(10)
 ```
 
-# Memory operation
 
-You can allocate or deallocate memory regions in PyDSL. You can also pass in a memory region from Python with numpy.NDArray, which can be modified in-place by PyDSL.
+# Memory
 
-Here is a basic example that accumulates the values of `range(3, 7, 2)`:
+There are two types in PyDSL for storing blocks of memory: `MemRef` and `Tensor`.
+
+A `MemRef` is a reference to a specific location in memory.
+Doing an operation on a `MemRef` causes it to be updated in-place.
+
+A `Tensor` is a higher level abstraction and represents a tensor (high dimensional array) object.
+A `Tensor` should behave quite similarly to a `numpy.ndarray`.
+
+Internally, a PyDSL `Tensor` first gets lowered to an MLIR `tensor`, then an MLIR `memref`, while a PyDSL `MemRef` gets lowered directly to an MLIR `memref`.
+
+If a PyDSL function has a `MemRef` or a `Tensor` as an argument, it expects to get a `numpy.ndarray` from the Python program.
+Other types, such as `list` are not currently supported.
+
+If the function argument is a `MemRef`, the `ndarray` that's passed in will be modified in-place.
+If the function argument is a `Tensor`, it is not guaranteed whether it will be modified in-place or if a new copy will be made.
+
+Thus, you should **not access an `ndarray` after it is passed to a PyDSL function as a `Tensor`**.
+
+Here is a very basic example that accumulates the values of `range(3, 7, 2)`:
 
 ```py
 import numpy as np
 from pydsl.frontend import compile
+from pydsl.memref import MemRefFactory
+from pydsl.type import Index, UInt64
 from pydsl.scf import range
-from pydsl.memref import MemRef
-from pydsl.type import UInt32, Index
 
-@compile(locals(), dump_mlir=True)
-def hello(m: MemRef[UInt32, 1]) -> None:
+MemRef64 = MemRefFactory((1,), UInt64)
+
+
+@compile(dump_mlir=True)
+def hello_memref(m: MemRef64) -> MemRef64:
     for i in range(3, 7, 2):
-        m[Index(0)] = m[Index(0)] + UInt32(i)
+        m[0] = m[0] + i
 
-n = np.asarray([0], dtype=np.uint32)
+    return m
 
-hello(n)
+n = np.asarray([0], dtype=np.uint64)
+
+hello_memref(n)
 print(n)  # [8]
+
 ```
 
-If MemRef is provided by the Python caller, it **must** be passed in as a NumPy array with the correct type and dimension. The function will not accept any other iterables or array with the wrong type. PyDSL cannot cast arrays for the user as most NumPy casting requires a new copy of the array to be created, which the user code would not have a reference of.
+Some notes:
+- `MemRef64` is a type that is defined dynamically outside of the compiled function using `MemRefFactory`. It specifies a memory region of a single element requiring a dtype of UInt64.
+- You **must** pass in a Numpy array with the correct type and dimension. The function will not accept any other iterables or arrays with the wrong type. We cannot cast your array for you as most Numpy casting requires a new copy of the array to be created, which your code would not have a reference of.
 
-**In addition, NumPy arrays should never be passed into a function without the caller holding onto at least one reference of it in Python**. If the user creates and pass in the NumPy array directly, it will be deallocated automatically by NumPy and PyDSL will be left writing to a dangling pointer.
+> ⚠️ **WARNING:** DO NOT PASS IN A NUMPY ARRAY WITHOUT HOLDING ONTO AT LEAST ONE REFERENCE OF IT IN PYTHON.
+> - if you create and pass in the numpy array directly, it will be deallocated automatically by Numpy and PyDSL will be left writing to a dangling pointer!
+> - we're currently looking for a solution to override this behavior
 
 Here is an example of what **NOT TO DO**. This would return an array pointing to garbage and may even risk segmentation fault.
 ```py
@@ -459,7 +502,7 @@ assert (f() == np.asarray([1], dtype=np.uint32)).all()
 
 ## Defining the dimension of your array
 
-`MemRef` supports arbitrary rank. With respect to MLIR's restriction, the element dtype of any `MemRef` must be one of the following:
+MemRef supports arbitrary rank. With respect to MLIR's restriction, the element dtype of any MemRef must be one of the following:
 - `IntegerType`,
 - `F16Type`,
 - `F32Type`,
@@ -467,7 +510,7 @@ assert (f() == np.asarray([1], dtype=np.uint32)).all()
 - `IndexType`,
 - `ComplexType`
 
-When using MemRefFactory, make sure the first argument is always a tuple. Python has a particular way of writing a single-element tuple.
+Make sure the first argument is always a tuple. Python has a particular way of writing a single-element tuple.
 ```py
 # (1) is NOT a tuple. This will throw an error!
 MemRef64 = MemRefFactory((1), UInt32)
@@ -494,6 +537,59 @@ MemrefF32 = MemRefFactory((DYNAMIC, DYNAMIC), F32) # this creates memref<?x?xf32
 - Note that `memref.dim` is currently not supported. The size of the array must be passed in alongside the MemRef into the function.
 
 Unranked MemRefs (e.g. `memref<*xf32>`) are currently not supported.
+
+## MemRef layout
+
+`MemRef`s currently support the default layout and a strided layout.
+See https://mlir.llvm.org/docs/Dialects/Builtin/#layout for a description of these layouts.
+AFfine map layouts (other than the default identity map) are currently not supported.
+
+To make a `MemRef` with a strided layout, specify the `offset` and `strides` parameters when calling `MemRefFactory`.
+E.g.
+```py
+MemRefStrided = MemRefFactory((10, 20), F32, offset=0, strides=(20, 1))
+```
+
+`offset` and `strides` can also have `DYNAMIC` values.
+
+The main usecase for declaring a `MemRef` type with a strided layout is probably if you want to return a `MemRef` that's the
+result of a slice (`memref.subview`) operation, since those can result in a `MemRef` with a strided layout.
+
+`Tensor`s do not explicitly have a layout, internally they always have `offset` and `strides` filled with all `DYNAMIC` values.
+
+## Arrray indexing
+
+`Tensor`s and `MemRef`s can be indexed by providing the indices in a single subscript operator, separated by commas.
+For example:
+```py
+def f(m1: MemRef[F64, 10, 10]):
+    m1[2, 3] = 50
+```
+
+Slicing of `Tensor` and `MemRef` is also supported, and they map to `tensor.extract_slice`, `tensor.insert_slice`, and `memref.subview` in MLIR.
+Currently, the return type of an `extract_slice` and `subview` is always a `Tensor`/`MemRef` with fully dynamic dimensions, regardless of whether
+it would be possible to statically determine the dimensions at compile time.
+For `MemRef`, this means the `offset` and `strides` attributes are also dynamic.
+`MemRef` provides `.get_fully_dynamic` to return a `MemRef` type with dynamic shape, offset, and strides, useful for specifying the return type of a
+function which returns a subview of a `MemRef`.
+For `Tensor`, typing `Tensor[F32, DYNAMIC, DYNAMIC]` or similar is not too verbose.
+
+In the future, we will support casting `MemRef` and `Tensor` to different shapes, which should give more flexibility with specifying the types of
+results of slicing.
+
+If the number of indices is less than the rank of the `MemRef` or `Tensor`, the remaining dimensions are assumed to be `::`.
+
+**PyDSL currently does not support negative indices!**
+`arr[3:-2:-1]` is valid in Python, and it takes a slice from index `3` to index `len(arr)-2` and reverses it.
+However, PyDSL does not parse negative indices in any special way, so `tensor[3:-2:-1]` will get lowered to MLIR exactly as if all indices were non-negative.
+This will most likely result in undefined behaviour.
+
+PyDSL currently does not do any bounds checking.
+Invalid indexing/slicing compiles without a warning and produces undefined behaviour.
+
+When copying a `Tensor` to a slice of another `Tensor` (e.g. `tensor1[1:6, 3:9:2] = tensor2`), the shape of the inserted tensor must match the shape of the slice.
+E.g. in the above example, if `tensor1` has rank `2`, then `tensor2` must have shape `(5, 3)` at runtime.
+
 
 # Affine programming
 
@@ -647,7 +743,8 @@ Like in MLIR, there are two functions you need to define:
 - The payload function that will actually run
 - The transform sequence function that performs transformations on the payload function
 
-The transform sequence can be defined by creating a function with an `AnyOp` argument, then passing its name into the `@compile` decorator. Note that `AnyOp` type lowers to `!transform.any_op` type.
+The transform sequence can be defined by creating a function with an `AnyOp` argument, then passing its name into the `@compile` decorator.
+Note that `AnyOp` type lowers to `!transform.any_op` type.
 
 ```py
 def transform_seq(targ: AnyOp):
@@ -696,14 +793,14 @@ from pydsl.type import F32, Index
 
 n = 2200
 m = 1800
-MemrefF32NM = MemRefFactory((n, m), F32)
+MemRefF32NM = MemRefFactory((n, m), F32)
 
 
 @compile(locals(), dump_mlir=True)
 def affine_example(
     v0: Index,
     v1: Index,
-    A: MemrefF32NM,
+    A: MemRefF32NM,
 ) -> F32:
     with recursively(lambda x: tag(x, "hello")):
         b: F32 = 0.0
@@ -813,7 +910,7 @@ The protocol's callback functions usually take on a specific signature:
 - The inputs always include the visitor itself and the AST node being traversed when this macro is called. The visitor is needed to access contextual information such as the statically-analyzed variable stack and to delegate subtree traversals back to it. The AST node is the input to the macro transformation.
 - The return type is always SubtreeOut, a typing alias that represents any lowerable wrapper class around MLIR Python binding types. This is the output of the macro transformation.
 
-It is impractical to give a comprehensive overview on every possible use case of macros as each macro exists for different purposes. New subclasses of `Macro` may also need to be defined for significantly different use cases. For more examples, it may be helpful to look at existing examples of macros in transform.py or the on_Call functions in type.py to motivate oneself of this design pattern.
+It is impractical to give a comprehensive overview on every possible use case of macros as each macro exists for different purposes. New subclasses of `Macro` may also need to be defined for significantly different use cases. For more examples, it may be helpful to look at existing examples of macros in `transform.py` or the `on_Call` functions in `type.py` to motivate oneself of this design pattern.
 
 Be careful when using this system, however. Creating a new macro requires understanding the internals of how the compiler works. The macro is responsible for accepting internal intermediate representation and converting it into MLIR via the MLIR Python binding.
 
@@ -847,7 +944,7 @@ def lower_single(
 ) -> Value | mlir.Type:
     """
     lower with the return value stripped of its tuple.
-    Lowered output tuple must have length of exactly 1. 
+    Lowered output tuple must have length of exactly 1.
     """
     res = lower(v)
     if len(res) != 1:

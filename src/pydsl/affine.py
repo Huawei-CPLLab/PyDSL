@@ -238,6 +238,12 @@ class IntegerSetExpr:
         )
 
     def to_affine_if(self, results, has_else=False) -> affine.AffineIfOp:
+        # TODO: affine if needs https://github.com/llvm/llvm-project/pull/108323
+        # to work, which is only included in LLVM 20.1.0. Remove this error and
+        # re-enable the relevant testcases after upgrading to LLMV 20.
+        raise NotImplementedError(
+            "AffineIf needs Python bindings from LLVM 20 to work correctly"
+        )
         lowered = self.lowered()
         return affine.AffineIfOp(
             lowered.set,

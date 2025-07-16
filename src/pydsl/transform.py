@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
-from typing import Optional
+from typing import List, Optional
 
 from mlir.dialects import transform
 from mlir.dialects.transform import loop, structured
@@ -133,8 +133,8 @@ def match_tag(
 
 @CallMacro.generate()
 def fuse_into(
-    visitor: ToMLIRBase, loop: Compiled[AnyOp], target: Compiled[AnyOp]
-) -> AnyOp:
+    visitor: ToMLIRBase, loop: Compiled[AnyOp], target: Compiled
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
@@ -143,8 +143,8 @@ def fuse(
     visitor: ToMLIRBase,
     target1: Compiled[AnyOp],
     target2: Compiled[AnyOp],
-    depth: Evaluated[int],
-) -> AnyOp:
+    depth: Evaluated,
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
@@ -153,8 +153,8 @@ def skew(
     visitor: ToMLIRBase,
     outer: Compiled[AnyOp],
     inner: Compiled[AnyOp],
-    amount: Evaluated[int],
-) -> AnyOp:
+    amount: Evaluated,
+):
     raise NotImplementedError()
 
 
@@ -164,7 +164,7 @@ def blockreorder(
     permutation: Evaluated[list[int]],
     retlen: Evaluated[int],
     *inputs: list[Compiled[AnyOp]],
-) -> AnyOp:
+):
     raise NotImplementedError()
 
 
@@ -174,46 +174,49 @@ def tile(
     target: Compiled[AnyOp],
     tile_sizes: Evaluated[int],
     retlen: Evaluated[int],
-) -> AnyOp:
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
 @CallMacro.generate()
 def reorder(
-    visitor: ToMLIRBase,
-    first_loop: Compiled[AnyOp],
-    second_loop: Compiled[AnyOp],
-) -> AnyOp:
+    visitor: ToMLIRBase, first_loop: Compiled[AnyOp], second_loop: Compiled
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
 @CallMacro.generate()
 def unroll(
     visitor: ToMLIRBase, target: Compiled[AnyOp], factor: Evaluated
-) -> AnyOp:
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
 @CallMacro.generate()
 def distribute(
     visitor: ToMLIRBase, target: Compiled[AnyOp], retlen: Evaluated
-) -> AnyOp:
+) -> SubtreeOut:
     raise NotImplementedError()
 
 
 @CallMacro.generate()
 def get_loop(
     visitor: ToMLIRBase, target: Compiled[AnyOp], index: Evaluated
-) -> AnyOp:
-    raise NotImplementedError()
+) -> SubtreeOut:
+    if hasattr(target, "loops"):
+        return target.loops[index]
+    return target.operation.results[index]
 
 
 @CallMacro.generate()
 def parallel(
-    visitor: ToMLIRBase,
-    target: Compiled[AnyOp],
-    force: Evaluated[bool] = False,
-) -> AnyOp:
+    visitor: ToMLIRBase, target: Compiled[AnyOp], force: Evaluated = False
+) -> SubtreeOut:
+    raise NotImplementedError()
+
+
+@CallMacro.generate()
+def vectorize(visitor: ToMLIRBase, target: Compiled) -> SubtreeOut:
     raise NotImplementedError()
 
 
@@ -223,11 +226,6 @@ def distributed_parallel(
     target: Compiled[AnyOp],
     nproc: Evaluated[int] = 1,
 ) -> AnyOp:
-    raise NotImplementedError()
-
-
-@CallMacro.generate()
-def vectorize(visitor: ToMLIRBase, target: Compiled[AnyOp]) -> AnyOp:
     raise NotImplementedError()
 
 

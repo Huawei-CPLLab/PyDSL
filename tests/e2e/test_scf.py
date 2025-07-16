@@ -1,17 +1,11 @@
 import numpy as np
 
-# import pytest
-
 from pydsl.frontend import compile
 from pydsl.memref import MemRefFactory
-from pydsl.type import (
-    Index,
-    UInt32,
-    Bool,
-)
+from pydsl.type import Index, UInt32, Bool
 from pydsl.scf import range as srange
 
-# from tests.e2e.helper import compilation_failed_from
+from helper import run
 
 MemRefSingle = MemRefFactory((1,), UInt32)
 
@@ -69,3 +63,10 @@ def test_if_else():
 
     f(n, True)
     assert n[0] == 5
+
+
+if __name__ == "__main__":
+    run(test_range_basic)
+    run(test_range_implicit_type)
+    run(test_if)
+    run(test_if_else)

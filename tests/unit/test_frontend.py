@@ -1,6 +1,7 @@
 from ctypes import Array, c_bool, c_int32, c_void_p
 
 from pydsl.frontend import CTypeTree_from_Structure, CTypeTree_to_Structure
+from helper import run
 
 
 def recursive_eq(a, b) -> bool:
@@ -40,3 +41,7 @@ def test_identity_of_CTypeTree_to_and_from():
     s = CTypeTree_to_Structure(ct, c1)
     c2 = CTypeTree_from_Structure(ct, s)
     assert recursive_eq(c1, c2)
+
+
+if __name__ == "__main__":
+    run(test_identity_of_CTypeTree_to_and_from)

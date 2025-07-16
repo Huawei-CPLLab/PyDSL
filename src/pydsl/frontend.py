@@ -414,8 +414,10 @@ class CTarget(CompilationTarget):
             if self.settings.transform_seq is not None
             else []
         )
+        # copy-before-write disables one-shot-bufferize from making
+        # optimizations. Can be useful for debugging.
         one_shot_bufferize = [
-            "copy-before-write",
+            # "copy-before-write",
             "allow-unknown-ops",
             "bufferize-function-boundaries",
         ]
@@ -441,6 +443,9 @@ class CTarget(CompilationTarget):
             "-llvm-request-c-wrappers",
             "-convert-math-to-libm",
             "-convert-func-to-llvm",
+            # Only necessary for LLVM 20
+            # "-convert-arith-to-llvm",
+            # "-convert-cf-to-llvm",
             "-reconcile-unrealized-casts",
             "-test-transform-dialect-erase-schedule",
             "-cse",
@@ -537,6 +542,9 @@ compilation may fail entirely.
             src,
             "-o",
             file.name,
+            "-L$PYDSL_LLVM/lib",
+            "-Wl,-rpath=$PYDSL_LLVM/lib",
+            "-lmlir_c_runner_utils",
         ])
 
         return file
@@ -770,7 +778,7 @@ compilation may fail entirely.
             # - The inner tuple formats the returned element in the same
             #   way as a composite struct
             # See docstring of get_return_ctypes for detail
-            retval_ct = ((retval,),)  # Call function
+            retval_ct = ((retval,),)
 
             # This is a necessary compensation as MLIR lowering confuses
             # single-element tuples with actual single elements, which
