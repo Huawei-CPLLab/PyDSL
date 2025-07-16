@@ -9,10 +9,32 @@ from mlir.dialects.linalg.opdsl.lang.comprehension import BinaryFn, TypeFn
 from pydsl.macro import CallMacro, Compiled
 from pydsl.memref import MemRef
 from pydsl.protocols import ToMLIRBase, lower_single
-from pydsl.tensor import Tensor, TensorFactory
+from pydsl.tensor import DYNAMIC, Tensor, TensorFactory
 
 # Compiled TypeAlias needs Lowerable
 from pydsl.type import Float, Int, Sign
+
+
+def build_empty_tensor(
+    sizes,
+    element_type,
+    *,
+    loc=None,
+    ip=None,
+):
+    dynamic_sizes = []
+    static_sizes = []
+    for s in sizes:
+        if isinstance(s, int):
+            static_sizes.append(s)
+        else:
+            static_sizes.append(DYNAMIC)
+            dynamic_sizes.append(s)
+
+    result_type = TensorFactory(tuple(static_sizes), element_type)
+    return mlir_tensor.empty(
+        lower_single(result_type), dynamic_sizes, loc=loc, ip=ip
+    )
 
 
 def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
@@ -35,7 +57,7 @@ def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
                 # Tensors are immutable, so a new Tensor is always made
                 ret_tensor = TensorFactory(x.shape, x.element_type)
                 ret = ret_tensor(
-                    mlir_tensor.empty(
+                    build_empty_tensor(
                         x.runtime_shape, lower_single(x.element_type)
                     )
                 )
@@ -108,7 +130,7 @@ def _gen_elementwise_binary_macro(
             case Tensor(), Tensor():
                 ret_tensor = TensorFactory(x.shape, x.element_type)
                 ret = ret_tensor(
-                    mlir_tensor.empty(
+                    build_empty_tensor(
                         x.runtime_shape, lower_single(x.element_type)
                     )
                 )
@@ -249,7 +271,7 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
                 y.runtime_shape[2],
             ]
             ret = ret_tensor(
-                mlir_tensor.empty(
+                build_empty_tensor(
                     ret_runtime_shape, lower_single(x.element_type)
                 )
             )

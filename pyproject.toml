@@ -31,10 +31,14 @@ testpaths = ["tests/"]
 addopts = [
     "--import-mode=importlib",
 ]
+pythonpath = [
+  ".", "src",
+]
 
 [tool.ruff]
 line-length = 79
 indent-width = 4
+exclude = ["llvm-project/**"]
 
 [tool.ruff.format]
 preview = true

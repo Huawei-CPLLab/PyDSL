@@ -168,3 +168,6 @@ cython_debug/
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Directory to test random things
+tmp/*

@@ -1,17 +1,11 @@
 import numpy as np
 
-# import pytest
-
-from pydsl.affine import affine_range as arange, integer_set as iset
 from pydsl.frontend import compile
 from pydsl.memref import DYNAMIC, MemRefFactory
 from pydsl.tensor import TensorFactory
-from pydsl.type import (
-    F64,
-    UInt64,
-)
+from pydsl.type import F64, UInt64
 import pydsl.linalg as linalg
-from tests.e2e.helper import compilation_failed_from
+from helper import run
 
 TensorF64 = TensorFactory((DYNAMIC,), F64)
 MemRefF64 = MemRefFactory((DYNAMIC,), F64)
@@ -126,3 +120,17 @@ def test_linalg_tanh():
 
 #     t1 = np.asarray([i for i in range(10)], np.float64)
 #     assert np.allclose(f(t1), np.erf(t1))
+
+
+if __name__ == "__main__":
+    run(test_linalg_exp)
+    run(test_linalg_log)
+    run(test_linalg_abs)
+    run(test_linalg_ceil)
+    run(test_linalg_floor)
+    run(test_linalg_negf)
+    run(test_linalg_round)
+    run(test_linalg_sqrt)
+    run(test_linalg_rsqrt)
+    run(test_linalg_square)
+    run(test_linalg_tanh)

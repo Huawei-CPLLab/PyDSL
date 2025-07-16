@@ -1,15 +1,10 @@
 import ast
-from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
-from typing import Any
 
-import pytest
-
-from pydsl.compiler import ToMLIR
 from pydsl.frontend import compile
 from pydsl.macro import CallMacro, Compiled, Evaluated, Uncompiled
-from pydsl.protocols import SubtreeOut, ToMLIRBase
-from pydsl.type import Number, UInt32, get_operator, supports_operator
+from pydsl.protocols import ToMLIRBase
+from pydsl.type import Number, UInt32
+from helper import run
 
 
 def test_Compiled_ArgCompiler():
@@ -65,3 +60,10 @@ def test_ArgCompiler_fmap():
         c: UInt32 = 7
         d: UInt32 = 8
         bind(a, a, b, c, d, b=b, a=a, d=d, c=c)
+
+
+if __name__ == "__main__":
+    run(test_Compiled_ArgCompiler)
+    run(test_Evaluated_ArgCompiler)
+    run(test_Uncompiled_ArgCompiler)
+    run(test_ArgCompiler_fmap)

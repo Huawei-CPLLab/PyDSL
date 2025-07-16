@@ -1,21 +1,68 @@
 from contextlib import contextmanager
+import gc
+import sys
 import math
-import re
-
 import numpy as np
-import pytest
+import re
 
 from pydsl.compiler import CompilationError
 
 
 @contextmanager
-def compilation_failed_from(error_type: type[Exception]):
-    with pytest.raises(CompilationError) as e:
+def failed_from(error_type: type[Exception]):
+    """
+    Same purpose as pytest.raises, was added when we were using llvm-lit
+    instead of PyTest. Keeping this since its error messages are a bit more
+    descriptive than pytest.raises.
+    """
+    try:
         yield
+    except Exception as e:
+        assert isinstance(
+            e, error_type
+        ), f"expected {error_type}, but instead got {type(e)}"
+    else:
+        assert False, f"expected {error_type}, but no error was raised"
 
-    assert isinstance(
-        e.value.exception, error_type
-    ), f"CompilationError is caused by {e.value.exception}, not {error_type}"
+
+@contextmanager
+def compilation_failed_from(error_type: type[Exception]):
+    try:
+        yield
+    except Exception as e:
+        assert isinstance(
+            e, CompilationError
+        ), f"expected CompilationError, but instead got {type(e)}"
+
+        assert isinstance(
+            e.exception, error_type
+        ), f"CompilationError is caused by {e.exception}, but should be {error_type}"
+    else:
+        assert False, f"expected CompilationError caused by {error_type}, but no error was raised"
+
+
+def multi_arange(shape: tuple[int], dtype: type) -> np.ndarray:
+    """
+    Returns an ndarray with the given shape and values filled in
+    as 0, 1, 2, ...
+    """
+    return np.arange(math.prod(shape), dtype=dtype).reshape(shape)
+
+
+# Log everything to stderr and flush so that we have a unified stream to match
+# errors/info emitted by MLIR to stderr.
+def log(*args):
+    print(*args, file=sys.stderr)
+    sys.stderr.flush()
+
+
+# Implemented for llvm-lit, kept because this is nice if you want to test an
+# individual file instead of using hatch test everything.
+def run(f):
+    log("\nTEST:", f.__name__)
+    f()
+    log("SUCCESS:", f.__name__)
+    gc.collect()
 
 
 f32info = np.finfo(np.float32)

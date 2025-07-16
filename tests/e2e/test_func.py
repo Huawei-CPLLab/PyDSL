@@ -1,13 +1,10 @@
 from typing import Any, TypeAlias, TypeVar
 
 import numpy as np
-import pytest
-
-from pydsl.compiler import CompilationError
 from pydsl.frontend import compile
-from pydsl.memref import MemRef, MemRefFactory
 from pydsl.type import F32, Index, SInt16, Tuple, UInt16
-from tests.e2e.helper import compilation_failed_from, f32_isclose
+from helper import compilation_failed_from, f32_isclose, run
+from pydsl.memref import MemRef, MemRefFactory
 
 
 def test_compile_identity():
@@ -20,11 +17,11 @@ def test_compile_identity():
 
 
 def test_compile_multiple():
-    @compile(globals(), dump_mlir=True)
+    @compile(globals())
     def identity_1(a: Index) -> Index:
         return a
 
-    @compile(globals(), dump_mlir=True)
+    @compile(globals())
     def identity_2(
         a: Index,
         b: Index,
@@ -41,16 +38,6 @@ def test_illegal_no_arg_type():
         @compile(globals())
         def _(a) -> Index:
             return a
-
-
-# This is an experimental language feature requirement
-
-# def test_illegal_no_return_type():
-#     with compilation_failed_from(SyntaxError):
-
-#         @compile(globals())
-#         def _(a: Index):
-#             pass
 
 
 def test_illegal_type_hint_arg():
@@ -145,7 +132,7 @@ def test_illegal_composite_type_hint():
     T = TypeVar("T")
     BadType: TypeAlias = Any | T
 
-    with pytest.raises(CompilationError):
+    with compilation_failed_from(NameError):
 
         @compile(globals())
         def _(a: Index) -> BadType[Index]:
@@ -196,32 +183,6 @@ def test_illegal_nonexistent_name():
             return nonexistent_name  # type: ignore
 
 
-def test_return_empty_tuple():
-    def cast() -> Tuple[()]:
-        return ()
-
-    emp = cast()
-    assert emp == ()
-
-
-def test_return_casting_tuple_1():
-    def cast() -> Tuple[F32]:
-        return 3.2
-
-    extra = cast()
-    assert f32_isclose(extra, 3.2)
-
-
-def test_return_casting_tuple_2():
-    def cast(a: UInt16) -> Tuple[F32, F32]:
-        return a, 3.2
-
-    for i in range(10):
-        i_casted, extra = cast(i)
-        assert f32_isclose(i_casted, i)
-        assert f32_isclose(extra, 3.2)
-
-
 def test_type_hint_definition_swap():
     """
     This test checks if compile() always uses the latest namespace to identify
@@ -253,6 +214,32 @@ def test_type_hint_definition_swap():
         raise AssertionError(
             "compile() seems to have not used the correct type hint"
         ) from e
+
+
+def test_return_empty_tuple():
+    def cast() -> Tuple[()]:
+        return ()
+
+    emp = cast()
+    assert emp == ()
+
+
+def test_return_casting_tuple_1():
+    def cast() -> Tuple[F32]:
+        return 3.2
+
+    extra = cast()
+    assert f32_isclose(extra, 3.2)
+
+
+def test_return_casting_tuple_2():
+    def cast(a: UInt16) -> Tuple[F32, F32]:
+        return a, 3.2
+
+    for i in range(10):
+        i_casted, extra = cast(i)
+        assert f32_isclose(i_casted, i)
+        assert f32_isclose(extra, 3.2)
 
 
 def test_module_call_basic():
@@ -293,3 +280,31 @@ def test_recursion():
     recursion(0, m)
 
     assert (m == np.ones(5, dtype=np.uint16)).all()
+
+
+if __name__ == "__main__":
+    run(test_compile_identity)
+    run(test_compile_multiple)
+    run(test_illegal_no_arg_type)
+    run(test_illegal_type_hint_arg)
+    run(test_illegal_type_hint_ret)
+    run(test_illegal_void_on_single_return)
+    run(test_illegal_Tuple_on_single_return)
+    run(test_illegal_single_on_Tuple_return)
+    run(test_illegal_single_mismatch_return)
+    run(test_illegal_Tuple_mismatch_return)
+    run(test_illegal_high_level_mismatch_return)
+    run(test_void_func_with_type_hint)
+    run(test_void_func_without_type_hint)
+    run(test_illegal_composite_type_hint)
+    run(test_Tuple_func)
+    run(test_single_Tuple_func)
+    run(test_name_shadowing)
+    run(test_illegal_nonexistent_name)
+    run(test_type_hint_definition_swap)
+    run(test_return_empty_tuple)
+    run(test_return_casting_tuple_1)
+    run(test_return_casting_tuple_2)
+    run(test_module_call_basic)
+    run(test_body_func)
+    run(test_recursion)

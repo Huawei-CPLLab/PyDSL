@@ -977,6 +977,16 @@ class Index(Int, width=get_index_width(), sign=Sign.UNSIGNED):
         lhs = self._try_casting(lhs)
         return type(self)(mlir_index.FloorDivSOp(lhs.value, self.value))
 
+    # TODO: maybe these should be unsigned ops. Actually, why do we treat Index
+    # as an unsigned type and not a signed type?
+    def op_ceildiv(self, rhs: SupportsIndex) -> "Index":
+        rhs = self._try_casting(rhs)
+        return type(self)(mlir_index.CeilDivSOp(self.value, rhs.value))
+
+    def op_rceildiv(self, lhs: SupportsIndex) -> "Index":
+        lhs = self._try_casting(lhs)
+        return type(self)(mlir_index.CeilDivSOp(lhs.value, self.value))
+
     @classmethod
     def CType(cls) -> tuple[type]:
         # TODO: this needs to be different depending on the platform.
@@ -1356,3 +1366,35 @@ class Tuple(typing.Generic[*DTypes]):
         return self.value
 
     # TODO: maybe need dedicated PolyCType?
+
+
+class Slice:
+    """
+    An object to represent a Python slice [lo:hi:step].
+    If some of the arguments are missing (e.g. [::3]) they will be
+    stored as None.
+    Note that most MLIR functions that take in slice-like inputs have
+    a different set of arguments from Python: they want lo, size, step.
+    """
+
+    lo: Index | None
+    hi: Index | None
+    step: Index | None
+
+    def __init__(self, lo: Index | None, hi: Index | None, step: Index | None):
+        self.lo = lo
+        self.hi = hi
+        self.step = step
+
+    def get_params(
+        self, max_size: SupportsIndex
+    ) -> tuple[Index, Index, Index]:
+        """
+        Returns [offset, size, step], which can be used for MLIR functions.
+        Returns 0, max_size, 1 instead of None values, respectively.
+        """
+        lo = Index(0) if self.lo is None else self.lo
+        hi = Index(max_size) if self.hi is None else self.hi
+        step = Index(1) if self.step is None else self.step
+        size = hi.op_sub(lo).op_ceildiv(step)
+        return (lo, size, step)
