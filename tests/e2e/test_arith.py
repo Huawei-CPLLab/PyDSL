@@ -8,7 +8,6 @@ from helper import (
     compilation_failed_from,
     run,
 )
-import numpy as np
 
 from pydsl.frontend import compile
 from pydsl.math import abs as p_abs
@@ -123,6 +122,17 @@ def test_cast_F64_to_Floats():
         assert isinstance(f64, float)
         assert f32_isclose(i, f32)
         assert f32_isclose(i, f64)
+
+
+def test_bad_cast_by_instance():
+    # If the CallMacro for casting is not set up correctly (e.g. using method
+    # type CLASS instead of CLASS_ONLY), this could compile.
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def cast(a: SInt64) -> F32:
+            b = F32(1.23)
+            return b(a)
 
 
 def test_UInt8_addition():
@@ -353,6 +363,7 @@ if __name__ == "__main__":
     run(test_cast_SInt64_to_Floats)
     run(test_cast_F32_to_Floats)
     run(test_cast_F64_to_Floats)
+    run(test_bad_cast_by_instance)
     run(test_UInt8_addition)
     run(test_UInt64_addition)
     run(test_illegal_different_sign_addition)

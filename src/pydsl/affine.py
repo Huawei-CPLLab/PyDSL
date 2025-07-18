@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import ast
 import builtins
-import inspect
-import typing
-from abc import abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import Enum, auto
-from inspect import BoundArguments
 from typing import TYPE_CHECKING, Any
 
 import mlir.ir as mlir
@@ -264,131 +260,85 @@ class AffineCallMacro(CallMacro):
     """
 
     @classmethod
-    def _on_Call(cls, visitor: ast.NodeVisitor, args: BoundArguments) -> Any:
-        if not isinstance(visitor, AffineMapExprWalk):
-            raise TypeError(
-                f"{cls.__name__} is an AffineCallMacro but was called outside "
-                f"of an affine map expression"
-            )
+    def generate_call(cls, f: Callable) -> Callable:
+        def validate_then_call(visitor: ToMLIRBase, *args, **kwargs):
+            if not isinstance(visitor, AffineMapExprWalk):
+                raise TypeError(
+                    f"{cls.__name__} is an AffineCallMacro but was called outside "
+                    f"of an affine map expression"
+                )
+            return f(visitor, *args, **kwargs)
 
-        return cls._affine_on_Call(visitor, args)
-
-    @abstractmethod
-    def _affine_on_Call(
-        visitor: AffineMapExprWalk, args: BoundArguments
-    ) -> Any:
-        return NotImplemented
+        return validate_then_call
 
 
-class dimension(AffineCallMacro):
+@AffineCallMacro.generate()
+def dimension(visitor: ToMLIRBase, arg: Uncompiled):
     """
     A dimension in an affine expression
     """
 
-    def signature():
-        def f(visitor: ToMLIRBase, arg: Uncompiled): ...
+    match arg:
+        case ast.Constant():
+            # Having a constant in a dim() has a very specific connotation.
+            # We cannot visit the constant as-is.
+            #
+            # We need to create an ad-hoc ConstantOp to be used as a dim.
+            # AffineDimExpr does not accept a AffineConstantExpr.
+            if type(arg.value) is not int:
+                raise TypeError(f"dimension expected integer, got {arg.value}")
 
-        return inspect.signature(f)
+            return visitor.add_dim(
+                arith.ConstantOp(IndexType.get(), arg.value)
+            )
 
-    def _affine_on_Call(
-        visitor: AffineMapExprWalk, args: BoundArguments
-    ) -> Any:
-        arg = args.arguments["arg"]
-        match arg:
-            case ast.Constant():
-                # Having a constant in a dim() has a very specific connotation.
-                # We cannot visit the constant as-is.
-                #
-                # We need to create an ad-hoc ConstantOp to be used as a dim.
-                # AffineDimExpr does not accept a AffineConstantExpr.
-                if type(arg.value) is not int:
-                    raise TypeError(
-                        f"dimension expected integer, got {arg.value}"
-                    )
+        case ast.Name():
+            return visitor.add_dim(visitor.visit_without_inference(arg))
 
-                return visitor.add_dim(
-                    arith.ConstantOp(IndexType.get(), arg.value)
-                )
-
-            case ast.Name():
-                return visitor.add_dim(visitor.visit_without_inference(arg))
-
-            case _:
-                raise TypeError(f"{type(arg)} type cannot be used in dim")
+        case _:
+            raise TypeError(f"{type(arg)} type cannot be used in dim")
 
 
-class symbol(AffineCallMacro):
+@AffineCallMacro.generate()
+def symbol(visitor: ToMLIRBase, arg: Uncompiled):
     """
     A symbol in an affine expression
     """
+    match arg:
+        case ast.Constant():
+            """
+            Having a constant in a sym() has a very specific connotation.
+            We cannot visit the constant as-is.
 
-    def signature():
-        def f(visitor: ToMLIRBase, arg: Uncompiled): ...
+            We need to create an ad-hoc ConstantOp to be passed into
+            AffineSymbolExpr. AffineSymbolExpr does not accept a
+            AffineConstantExpr.
+            """
+            if type(arg.value) is not int:
+                raise TypeError(f"symbol expected integer, got {arg.value}")
 
-        return inspect.signature(f)
+            return visitor.add_sym(
+                arith.ConstantOp(IndexType.get(), arg.value)
+            )
 
-    def _affine_on_Call(
-        visitor: AffineMapExprWalk, args: BoundArguments
-    ) -> Any:
-        arg = args.arguments["arg"]
-        match arg:
-            case ast.Constant():
-                """
-                Having a constant in a sym() has a very specific connotation.
-                We cannot visit the constant as-is.
+        case ast.Name():
+            return visitor.add_sym(visitor.visit_without_inference(arg))
 
-                We need to create an ad-hoc ConstantOp to be passed into
-                AffineSymbolExpr. AffineSymbolExpr does not accept a
-                AffineConstantExpr.
-                """
-                if type(arg.value) is not int:
-                    raise TypeError(
-                        f"symbol expected integer, got {arg.value}"
-                    )
-
-                return visitor.add_sym(
-                    arith.ConstantOp(IndexType.get(), arg.value)
-                )
-
-            case ast.Name():
-                return visitor.add_sym(visitor.visit_without_inference(arg))
-
-            case _:
-                raise TypeError(f"{type(arg)} type cannot be used in sym")
+        case _:
+            raise TypeError(f"{type(arg)} type cannot be used in sym")
 
 
-class floordivide(AffineCallMacro):
-    def signature():
-        def f(visitor: ToMLIRBase, left: Uncompiled, right: Uncompiled): ...
-
-        return inspect.signature(f)
-
-    def _affine_on_Call(
-        visitor: AffineMapExprWalk, args: BoundArguments
-    ) -> Any:
-        left = visitor.visit(args.arguments["left"])
-        right = visitor.visit(args.arguments["right"])
-        return AffineExpr.get_floor_div(left, right)
+@AffineCallMacro.generate()
+def floorfivide(visitor: ToMLIRBase, left: Uncompiled, right: Uncompiled):
+    return AffineExpr.get_floor_div(left, right)
 
 
-class ceildivide(AffineCallMacro):
-    def signature():
-        def f(visitor: ToMLIRBase, left: Uncompiled, right: Uncompiled): ...
-
-        return inspect.signature(f)
-
-    def _affine_on_Call(
-        visitor: AffineMapExprWalk, args: BoundArguments
-    ) -> Any:
-        left = visitor.visit(args.arguments["left"])
-        right = visitor.visit(args.arguments["right"])
-        return AffineExpr.get_ceil_div(left, right)
+@AffineCallMacro.generate()
+def ceildivide(visitor: ToMLIRBase, left: Uncompiled, right: Uncompiled):
+    return AffineExpr.get_ceil_div(left, right)
 
 
-AffineId: typing.TypeAlias = type[symbol | dimension]
-
-
-def infer_affine_id(v: SubtreeOut) -> set[AffineId]:
+def infer_affine_id(v: SubtreeOut) -> set:
     """
     Attempt to infer what affine identifier (e.g. dimension, symbol) the
     value belongs to
