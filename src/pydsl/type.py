@@ -614,32 +614,6 @@ class Bool(Int, width=1, sign=Sign.UNSIGNED):
             )
         )
 
-    @classmethod
-    def from_CType(cls, cval: "CTypeTree") -> bool:
-        return bool(cval[0])
-
-    @classmethod
-    def to_CType(cls, pyval: int | bool):
-        try:
-            pyval = bool(pyval)
-        except Exception as e:
-            raise TypeError(
-                f"{pyval} cannot be converted into a {cls.__name__} ctype. "
-                f"Reason: {e}"
-            )
-
-        return (pyval,)
-
-    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
-    def on_Call(
-        visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
-    ) -> Any:
-        match rep:
-            case ast.Constant():
-                return cls(rep.value)
-            case _:
-                return cls(visitor.visit(rep))
-
 
 AnyFloat = typing.TypeVar("AnyFloat", bound="Float")
 
@@ -998,32 +972,6 @@ class Index(Int, width=get_index_width(), sign=Sign.UNSIGNED):
     @classmethod
     def PolyCType(cls) -> tuple[type]:
         return (ctypes.c_int,)
-
-    @classmethod
-    def to_CType(cls, pyval: float | int | bool) -> tuple[int]:
-        try:
-            pyval = int(pyval)
-        except Exception as e:
-            raise TypeError(
-                f"{pyval} cannot be converted into a {cls.__name__} "
-                f"ctype. Reason: {e}"
-            )
-
-        return (pyval,)
-
-    @classmethod
-    def from_CType(cls, cval: "CTypeTree") -> int:
-        return int(cval[0])
-
-    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
-    def on_Call(
-        visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
-    ) -> Any:
-        match rep:
-            case ast.Constant():
-                return cls(rep.value)
-            case _:
-                return cls(visitor.visit(rep))
 
 
 # TODO: this class should be renamed to TransformAnyOp to avoid confusion
