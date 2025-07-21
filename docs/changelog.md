@@ -1,3 +1,25 @@
+# 2025 July 18: Slicing Update
+
+## Tensor updates
+
+- Added support for slicing of `Tensor` and `MemRef`.
+  - Added support for indexing `Tensor`, although not yet affine indexing.
+- Added support for strided `MemRef`s.
+- **[Not backwards compatible]** Changed `Tensor` and `MemRef` subclass name to
+be a keyword-only argument of the class factories
+- **[Not backwards compatible]** New `Tensor` passed as function argument policy:
+the function may produce MLIR that modifies the passed-in numpy array in place
+see the documentation.
+- Added Tensor class slicing support to declare tensor types
+
+## Other
+
+- Swtiched to LLVM version 19.
+  - **[Not backwards compatible]** Temporarily removed `AffineIf` support,
+  since this needs Python bindings from LLVM 20.
+- Link with `libmlir_c_runner_utils.so` to work properly on CPU.
+  - Updated build intructions.
+
 # December 2024 Update
 
 For details of these changes, see `docs/usage.md`.
@@ -27,7 +49,7 @@ For details of these changes, see `docs/usage.md`.
 - Tuple unpacking is now supported when assigning tuple to multiple variables. E.g. `fun, call = outline_loop(...)`.
 - `AnyOp` graduated from a dummy type hint to a full PyDSL type.
 
-## Other improvements:
+## Other improvements
 - Open-sourced the E2E tests which runs through the entire compilation pipeline and checks the result for 107 PyDSL programs.
 - More docstrings are added to methods and fields in the source.
 - Updated documentation (`docs/usage.md`).
