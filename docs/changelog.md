@@ -20,6 +20,21 @@ see the documentation.
 - Link with `libmlir_c_runner_utils.so` to work properly on CPU.
   - Updated build intructions.
 
+# 2025 July 21: CallMacro Improvements
+
+Rewrote some parts of the `CallMacro` system.
+Several of these changes are not backwards compatible if you implemented your
+own `CallMacro`s.
+
+- `CallMacro`s can now be called from other `CallMacro`s.
+  - Replaced internal `_on_Call` function with `__call__`.
+  - Call macros are now represented by instances of subclasses of `CallMacro`,
+  not subclasses directly.
+- Support making `CallMacro`s that behave like Python instance/class methods
+  using the `method_type` attribute, which can be specified in `CallMacro.generate`.
+  - Removed `is_member` attribute, which had very similar but much more
+  restricted functionality.
+
 # December 2024 Update
 
 For details of these changes, see `docs/usage.md`.

@@ -988,12 +988,13 @@ In a user-facing perspective, CallMacro can be thought of as a function that is 
 
 #### Example via `CallMacro.generate`
 
-Here is a basic example of a CallMacro that takes an MLIR node and attach a named integer attribute to it.
+Here is a basic example of a CallMacro that takes an MLIR node and attaches a
+named integer attribute to it.
 
 ```py
 @CallMacro.generate()
 def int_attr(
-    visitor: "ToMLIR",
+    visitor: ToMLIRBase,
     mlir: Compiled,
     attr_name: Evaluated[str],
     value: Evaluated[int],
@@ -1007,38 +1008,76 @@ def int_attr(
     return mlir
 ```
 
-Here's what the code mean:
-- `@CallMacro.generate()` is a decorator that takes the `int_attr` function and convert it into a subclass of `CallMacro`. We'll look at the internals of `CallMacro` in the next example.
-- The first argument that is passed into the macro is always the `ToMLIR` visitor that is walking the AST. It contains important contextual information you may need such as the live variables and the stack scopes when the function is called.
-- The arguments that come after are passed in by the user. **It is very important to know that the type hinting here are mandatory**, as they indicate how the arguments should be interpreted before it is passed into the function:
-    - `Compiled` means that the argument should be visited and compiled by the `ToMLIR` visitor before it is passed in. The type is always a `SubtreeOut` which is either raw MLIR or wrapper classes that can lower down to raw MLIR.
-    - `Evaluated[T]` means that the argument should be evaluated as a CPython expression. The expression is passed into an `eval()` function before passed in. This allows any arbitrary Python expression to be written, but usually this is for cases where you want the user to pass in string literals, numeric literals, or lambda functions.
-        - The `T` type argument in `Evaluated[T]` hints the evaluated Python type that is passed into the function. It does not affect any runtime behavior and is used only by type checkers.
-    - `Uncompiled` means the argument should be kept as an AST. This is useful for cases where you may want to delay the visiting process or want high degree of granularity in the way that the argument is compiled by your macro.
-        - If you want to visit this AST, use `visitor.visit` where `visitor` is the `ToMLIR` instance passed in as the first argument of the function.
-        - Refer to Python's `ast` module documentation on how to use AST nodes: https://docs.python.org/3/library/ast.html.
-- The macro must return a `SubtreeOut`, which can be thought of as a partial compilation result for a subtree of the program. This includes MLIR Python binding objects such as Values or Operations.
+Here's what the code means:
+- `@CallMacro.generate()` is a decorator that takes the `int_attr` function and
+converts it into a subclass of `CallMacro`. We'll look at the internals of
+`CallMacro` in the next example.
+- The first argument that is passed into the macro is always the `ToMLIR`
+visitor that is walking the AST. It contains important contextual information
+you may need such as the live variables and the stack scopes when the function
+is called.
+- The arguments that come after are passed in by the user. **It is very
+important to know that the type hinting here are mandatory**, as they indicate
+how the arguments should be interpreted before it is passed into the function:
+    - `Compiled` means that the argument should be visited and compiled by the
+    `ToMLIR` visitor before it is passed in. The type is always a `SubtreeOut`
+    which is either raw MLIR or wrapper classes that can lower down to raw MLIR.
+    - `Evaluated[T]` means that the argument should be evaluated as a CPython
+    expression. The expression is passed into an `eval()` function before
+    passed in. This allows any arbitrary Python expression to be written, but
+    usually this is for cases where you want the user to pass in string
+    literals, numeric literals, or lambda functions.
+        - The `T` type argument in `Evaluated[T]` hints the evaluated Python
+        type that is passed into the function. It does not affect any runtime
+        behavior and is used only by type checkers.
+    - `Uncompiled` means the argument should be kept as an AST. This is useful
+    for cases where you may want to delay the visiting process or want high
+    degree of granularity in the way that the argument is compiled by your macro.
+        - If you want to visit this AST, use `visitor.visit` where `visitor` is
+        the `ToMLIR` instance passed in as the first argument of the function.
+        - Refer to Python's `ast` module documentation on how to use AST nodes:
+        https://docs.python.org/3/library/ast.html.
+- The macro must return a `SubtreeOut`, which can be thought of as a partial
+compilation result for a subtree of the program. This includes MLIR Python
+binding objects such as Values or Operations.
+
+You can also specify the `method_type` to create call macros that behave like
+Python instance/class methods.
+- See Python documentation of `pydsl.macro.MethodType`.
+- See examples at `tests/e2e/test_macro.py`.
+    - `test_method_instance` to `test_method_static`.
 
 #### Example via subclassing CallMacro
 
-You can also define a call macro by subclassing `CallMacro`. Here's what that would look like:
+You can also define a call macro by subclassing `CallMacro`, although using
+`CallMacro.generate` is recommended when possible. Here's what
+using a subclass would look like:
 
 ```py
-class get_loop(CallMacro):
-    def argreps() -> list[ArgRep]:
-        return [ArgRep.COMPILED, ArgRep.EVALUATED]
+class GetLoopMacro(CallMacro):
+    @staticmethod
+    def signature() -> inspect.Signature:
+        def f(visitor: ToMLIRBase, target: Compiled, index: Evaluated): ...
+        return inspect.signature(f)
 
-    def _on_Call(visitor: "ToMLIR", args: list[Any]) -> OpView:
-        target, index = args
-
+    @staticmethod
+    def __call__(visitor: ToMLIRBase, target: Compiled, index: Evaluated) -> OpView:
         if hasattr(target, "loops"):
             return target.loops[index]
         return target.operation.results[index]
+
+get_loop = GetLoopMacro()
 ```
 
-Conceptually, this is identical to definining macros via `CallMacro.generate`. All subclasses are required to define 2 methods:
-- `argreps()` has the same function as the type hints, in that it describe how each argument should be pre-processed before they are passed into the function. The elements are any of `ArgRep.COMPILED`, `ArgRep.EVALUATED`, or `ArgRep.UNCOMPILED`.
-- `_on_Call()` is the macro function itself, except that arguments are passed in as a list.
+Conceptually, this is identical to definining macros via `CallMacro.generate`.
+All subclasses are required to define 2 methods:
+- `signature()` must return the signature of the macro function.
+- `__call__` is the macro function itself.
+
+Note that currently, for `CallMacro`s, we actually create an instance of the
+class, while for `IteratorMacro`s, we still work with the class objects
+directly. The main reason for using instances of `CallMacro`s is that we can
+name the call function `__call__` instead of `__init__`.
 
 ### Creating new IteratorMacro
 
