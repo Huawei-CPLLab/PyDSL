@@ -203,9 +203,26 @@ class UsesRMRD:
         flat_arr = np.ctypeslib.as_array(
             ctypes.cast(ptr, POINTER(element_ctype)), shape=(max_size,)
         )
-        return np.lib.stride_tricks.as_strided(
+        arr = np.lib.stride_tricks.as_strided(
             flat_arr, shape=rmd.shape, strides=byte_strides
         )
+
+        # If arr overlaps with any ndarray that was a parameter of the
+        # function, construct it from that instead so we have a pointer to the
+        # original ndarray and it doesn't deallocate the memory
+        base_arr = param_cont.get_overlap(arr)
+
+        if base_arr is not None:
+            # Use the buffer base_arr.data then apply the correct offset,
+            # shape, and strides. buf has a pointer to base_arr, and the new
+            # ndarray will also have this pointer when constructed from buf
+            buf = base_arr.data
+            base_ptr = base_arr.ctypes.data_as(c_void_p)
+            offs = int(ptr.value) - int(base_ptr.value)
+            arr = np.ndarray(rmd.shape, arr.dtype, buf, offs, byte_strides)
+            assert id(arr.base) == id(base_arr)
+
+        return arr
 
     @classmethod
     def same_shape(cls, x: np.ndarray) -> bool:
