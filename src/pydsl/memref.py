@@ -20,7 +20,7 @@ from mlir.ir import (
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
 from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.protocols import SubtreeOut, ToMLIRBase, lower
+from pydsl.protocols import ParamContainer, SubtreeOut, ToMLIRBase, lower
 from pydsl.type import (
     Index,
     Lowerable,
@@ -117,14 +117,20 @@ class RankedMemRefDescriptor:
             (Index.CType()[0] * len(cls.shape)),
         )
 
-    def as_CType(self) -> "CTypeTree":
-        return (*self,)
+    @classmethod
+    def to_CType(
+        cls, param_cont: ParamContainer, pyval: "RankedMemRefDescriptor"
+    ) -> "CTypeTree":
+        param_cont.add_param(pyval)
+        return (*pyval,)
 
     @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> "RankedMemRefDescriptor":
-        allo, align, offset, shape, strides = ct
+    def from_CType(
+        cls, param_cont: ParamContainer, ct: "CTypeTree"
+    ) -> "RankedMemRefDescriptor":
+        alloc, align, offset, shape, strides = ct
         return RankedMemRefDescriptor(
-            allocated_ptr=c_void_p(allo),
+            allocated_ptr=c_void_p(alloc),
             aligned_ptr=c_void_p(align),
             offset=offset,
             shape=tuple(shape),
@@ -134,7 +140,7 @@ class RankedMemRefDescriptor:
 
 class UsesRMRD:
     """
-    A mixin class for adding CType support for classes that eventually lowers
+    A mixin class for adding CType support for classes that eventually lower
     down to a ranked MemRef descriptor in LLVM C calling convention.
 
     This mostly exists to reduce code duplication.
@@ -158,7 +164,9 @@ class UsesRMRD:
         return RankedMemRefDescriptor.CType_of_MemRef(cls)
 
     @classmethod
-    def to_CType(cls, pyval: tuple | list | np.ndarray) -> RawRMRD:
+    def to_CType(
+        cls, param_cont: ParamContainer, pyval: tuple | list | np.ndarray
+    ) -> RawRMRD:
         """
         Accepts any value that is numpy.ndarray.
         """
@@ -169,17 +177,18 @@ class UsesRMRD:
                     f"{cls.__qualname__}. Supported types include numpy.ndarray"
                 )
             case np.ndarray():
-                return cls._ndarray_to_CType(pyval)
+                return cls._ndarray_to_CType(param_cont, pyval)
             case _:
                 raise TypeError(
-                    f"{type(pyval)} cannot be casted into a "
-                    f"{cls.__qualname__}"
+                    f"{type(pyval)} cannot be casted into a {cls.__qualname__}"
                 )
 
     @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> np.ndarray:
+    def from_CType(
+        cls, param_cont: ParamContainer, ct: "CTypeTree"
+    ) -> np.ndarray:
         # This requires element_type to be representable with a single ctypes element
-        rmd = RankedMemRefDescriptor.from_CType(ct)
+        rmd = RankedMemRefDescriptor.from_CType(param_cont, ct)
         element_ctype = cls.element_type.CType()[0]
         element_size = ctypes.sizeof(element_ctype)
         ptr = rmd.aligned_ptr  # No nice way to do this in one line it seems
@@ -225,7 +234,9 @@ class UsesRMRD:
             ])
 
     @classmethod
-    def _ndarray_to_CType(cls, a: np.ndarray) -> RawRMRD:
+    def _ndarray_to_CType(
+        cls, param_cont: ParamContainer, a: np.ndarray
+    ) -> RawRMRD:
         ndtype = cls.element_type.CType()
         if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
             raise TypeError(
@@ -271,7 +282,8 @@ class UsesRMRD:
             strides=[s // a.itemsize for s in a.strides],
         )
 
-        return rmd.as_CType()
+        param_cont.add_param(a)
+        return RankedMemRefDescriptor.to_CType(param_cont, rmd)
 
     @classmethod
     def PolyCType(cls) -> tuple[mlir.Type]:
@@ -291,8 +303,8 @@ class UsesRMRD:
         )
 
     @classmethod
-    def _arraylike_to_CType(cls, li) -> RawRMRD:
-        return cls._ndarray_to_CType(np.asarray(li))
+    def _arraylike_to_CType(cls, param_cont: ParamContainer, li) -> RawRMRD:
+        return cls._ndarray_to_CType(param_cont, np.asarray(li))
 
     @classmethod
     def rank(cls) -> int:
