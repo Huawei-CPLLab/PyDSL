@@ -7,6 +7,7 @@ import typing
 from abc import ABC, abstractmethod
 from ast import Expression
 from collections.abc import Callable
+from enum import auto, Enum
 from inspect import BoundArguments, Signature, signature
 from typing import Annotated, Any
 
@@ -119,17 +120,16 @@ class EvaluatedArg(ArgCompiler):
     """
 
     def compile(visitor: ToMLIRBase, arg: ast.AST) -> Any:
-        def hydrate(f: Callable | CallMacro):
+        def hydrate(f: CallMacro | Any):
             """
-            Helper function that takes a function and redirects the call to
-            _on_Call if it is a subclass of CallMacro.
+            Helper function that takes a function and prepends visitor as an
+            argument if it is a callmacro.
             """
             if not iscallmacro(f):
                 return f
 
             def hydrated_f(*args, **kwargs):
-                ba = f.signature().bind(visitor, *args, **kwargs)
-                return f._on_Call(visitor, ba)
+                return f(visitor, *args, **kwargs)
 
             return hydrated_f
 
@@ -191,7 +191,40 @@ Uncompiled: typing.TypeAlias = Annotated[T, UncompiledArg]
 
 
 def iscallmacro(f: Any) -> bool:
-    return issubclass(type(f), type) and issubclass(f, CallMacro)
+    return isinstance(f, CallMacro)
+
+
+class MethodType(Enum):
+    """
+    For a CallMacro that's a method of a class, this determines which of self
+    and cls will be passed as the second argument of the function (the first
+    is always visitor).
+
+    Assume you have a class Cls, obj is an instance of Cls, and it has a method
+    f that's a CallMacro.
+    Below is what will happen for each possible value of method type if you try
+    to call f on obj or Cls.
+
+    INSTANCE:
+        obj.f(args) -> f(visitor, obj, args)
+        Cls.f(args) -> compile error
+    CLASS:
+        obj.f(args) -> f(visitor, Cls, args)
+        Cls.f(args) -> f(visitor, Cls, args)
+    STATIC:
+        obj.f(args) -> f(visitor, args)
+        Cls.f(args) -> f(visitor, args)
+    CLASS_ONLY:
+        obj.f(args) -> compile error
+        Cls.f(args) -> f(visitor, Cls, args)
+
+    For a function that's not within a class, always use STATIC.
+    """
+
+    STATIC = auto()
+    INSTANCE = auto()
+    CLASS = auto()
+    CLASS_ONLY = auto()
 
 
 class CallMacro(Macro):
@@ -214,7 +247,7 @@ class CallMacro(Macro):
     automatically be prepended with the ToMLIRBase visitor.
     """
 
-    is_member = False
+    method_type = MethodType.STATIC
 
     @staticmethod
     def parse_args(
@@ -297,14 +330,16 @@ class CallMacro(Macro):
         the macro.
         """
         return NotImplemented
-
+    
     @abstractmethod
-    def _on_Call(
-        visitor: ast.NodeVisitor,
-        args: BoundArguments,
-    ) -> Any:
+    def __call__() -> SubtreeOut:
+        """
+        This function must be overwritten to specify the actual behaviour of
+        the macro.
+        """
         return NotImplemented
 
+    @staticmethod
     def on_Call(
         attr_chain,
         visitor: ToMLIRBase,
@@ -314,52 +349,83 @@ class CallMacro(Macro):
         fn = attr_chain[-1]
 
         # Prefix the appropriate values to function arguments
-        if fn.is_member:
-            # if a member function, append the class as a prefix
-            assert (
-                len(attr_chain) >= 2
-            ), f"attribute chain does not contain the class of {fn}"
-            prefix_args = (attr_chain[-2], *prefix_args)
+        if fn.method_type != MethodType.STATIC:
+            if len(attr_chain) < 2:
+                raise SyntaxError(
+                    f"attribute chain does not contain the class of {fn}"
+                )
+
+            x = attr_chain[-2]
+            is_cls = isinstance(x, type)
+
+            match fn.method_type:
+                case MethodType.INSTANCE:
+                    if is_cls:
+                        raise TypeError(
+                            f"trying to call instance method {fn} on the class"
+                        )
+                    else:
+                        prefix_args = (x, *prefix_args)
+                case MethodType.CLASS:
+                    if is_cls:
+                        prefix_args = (x, *prefix_args)
+                    else:
+                        prefix_args = (type(x), *prefix_args)
+                case MethodType.CLASS_ONLY:
+                    if is_cls:
+                        prefix_args = (x, *prefix_args)
+                    else:
+                        raise TypeError(
+                            f"trying to call class only method {fn} on an instance"
+                        )
+
         prefix_args = (visitor, *prefix_args)
 
         bound_args = CallMacro.parse_args(
             fn.signature(), visitor, node, prefix_args=prefix_args
         )
 
-        return fn._on_Call(visitor, bound_args)
+        # Equivalent to fn.__call__(*bound_args.args, **bound_args.kwargs)
+        return fn(*bound_args.args, **bound_args.kwargs)
 
-    def generate(is_member=False):
+    @classmethod
+    def generate_call(cls, f: Callable) -> Callable:
+        """
+        Returns the function that should correspond to the __call__ of this
+        CallMacro. For a normal CallMacro, this is just f. This method exists
+        so that it can be overridden by AffineCallMacro.
+        """
+        return f
+
+    @classmethod
+    def generate(cls, *, method_type: MethodType = MethodType.STATIC):
         """
         Decorator that converts a function into a CallMacro.
 
-        This decorator may interpret type hinting in the function arguments
-        as such:
-        - The first argument must be ToMLIRBase (although this is not
-          enforced at runtime)
+        method_type can be set to create a CallMacro with behaviour similar to
+        a class or instance method in Python.
+
+        The arguments of a CallMacro are as follows:
+        - The first argument passed in will always be an object of type
+          ToMLIRBase, although its type-hinting is not enforced.
+        - If method_type is not STATIC, the second argument might be self or
+          cls, see the documentation of MethodType.
         - The remaining arguments must be type-hinted Annotation[a, b], where a
           can be any type, and b must be an ArgCompiler.
             - For your convenience, you can use Evaluated[T], Compiled, and
               Uncompiled for your remaining arguments.
-
-        If the macro is to be a @classmethod of a class, pass is_member=True.
-        The class will be passed as the first argument and it won't need to be
-        type-hinted.
         """
 
         def generate_sub(f: Callable) -> CallMacro:
-            def _on_Call(visitor, ba):
-                return f(*ba.args, **ba.kwargs)
-
-            # dynamically generate a new subclass of CallMacro that is based
-            # on f
+            # dynamically generate a new subclass of CallMacro based on f
             return type(
                 f.__name__,
-                (CallMacro,),
+                (cls,),
                 {
-                    "is_member": is_member,
-                    "signature": lambda: signature(f),
-                    "_on_Call": _on_Call,
+                    "method_type": method_type,
+                    "signature": staticmethod(lambda: signature(f)),
+                    "__call__": staticmethod(cls.generate_call(f)),
                 },
-            )
+            )()
 
         return generate_sub

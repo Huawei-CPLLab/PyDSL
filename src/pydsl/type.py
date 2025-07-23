@@ -28,7 +28,7 @@ from mlir.ir import (
     Value,
 )
 
-from pydsl.macro import CallMacro, Uncompiled
+from pydsl.macro import CallMacro, MethodType, Uncompiled
 from pydsl.protocols import ToMLIRBase
 
 if TYPE_CHECKING:
@@ -480,7 +480,7 @@ class Int(metaclass=Supportable):
     def from_CType(cls, cval: "CTypeTree"):
         return int(cval[0])
 
-    @CallMacro.generate(is_member=True)
+    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
     def on_Call(visitor: ToMLIRBase, cls: type[Self], rep: Uncompiled) -> Any:
         match rep:
             case ast.Constant():
@@ -630,7 +630,7 @@ class Bool(Int, width=1, sign=Sign.UNSIGNED):
 
         return (pyval,)
 
-    @CallMacro.generate(is_member=True)
+    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
     def on_Call(
         visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
     ) -> Any:
@@ -821,7 +821,7 @@ class Float(metaclass=Supportable):
     def from_CType(cls, cval: "CTypeTree"):
         return float(cval[0])
 
-    @CallMacro.generate(is_member=True)
+    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
     def on_Call(
         visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
     ) -> Any:
@@ -1015,7 +1015,7 @@ class Index(Int, width=get_index_width(), sign=Sign.UNSIGNED):
     def from_CType(cls, cval: "CTypeTree") -> int:
         return int(cval[0])
 
-    @CallMacro.generate(is_member=True)
+    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
     def on_Call(
         visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
     ) -> Any:
