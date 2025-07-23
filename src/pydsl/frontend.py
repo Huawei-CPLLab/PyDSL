@@ -65,9 +65,7 @@ class SupportsCType(Protocol):
         ...
 
     @classmethod
-    def to_CType(
-        cls: type, arg_cont: ArgContainer, pyval: Any
-    ) -> CTypeTree:
+    def to_CType(cls: type, arg_cont: ArgContainer, pyval: Any) -> CTypeTree:
         """
         Take a Python value and convert it to match the types of CType
         """
@@ -769,9 +767,7 @@ compilation may fail entirely.
         mapped_args_ct = [
             (
                 ct,
-                self.val_to_CType(
-                    arg_cont, sig.parameters[key].annotation, a
-                ),
+                self.val_to_CType(arg_cont, sig.parameters[key].annotation, a),
             )
             for ct, key, a in zip(
                 self.get_args_ctypes(f), sig.parameters, args, strict=False

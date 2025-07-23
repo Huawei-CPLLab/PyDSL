@@ -184,9 +184,7 @@ class UsesRMRD:
                 )
 
     @classmethod
-    def from_CType(
-        cls, arg_cont: ArgContainer, ct: "CTypeTree"
-    ) -> np.ndarray:
+    def from_CType(cls, arg_cont: ArgContainer, ct: "CTypeTree") -> np.ndarray:
         # This requires element_type to be representable with a single ctypes element
         rmd = RankedMemRefDescriptor.from_CType(arg_cont, ct)
         element_ctype = cls.element_type.CType()[0]
