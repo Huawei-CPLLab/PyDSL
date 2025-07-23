@@ -20,7 +20,7 @@ from mlir.ir import (
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
 from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.protocols import ParamContainer, SubtreeOut, ToMLIRBase, lower
+from pydsl.protocols import ArgContainer, SubtreeOut, ToMLIRBase, lower
 from pydsl.type import (
     Index,
     Lowerable,
@@ -119,14 +119,14 @@ class RankedMemRefDescriptor:
 
     @classmethod
     def to_CType(
-        cls, param_cont: ParamContainer, pyval: "RankedMemRefDescriptor"
+        cls, arg_cont: ArgContainer, pyval: "RankedMemRefDescriptor"
     ) -> "CTypeTree":
-        param_cont.add_param(pyval)
+        arg_cont.add_arg(pyval)
         return (*pyval,)
 
     @classmethod
     def from_CType(
-        cls, param_cont: ParamContainer, ct: "CTypeTree"
+        cls, arg_cont: ArgContainer, ct: "CTypeTree"
     ) -> "RankedMemRefDescriptor":
         alloc, align, offset, shape, strides = ct
         return RankedMemRefDescriptor(
@@ -165,7 +165,7 @@ class UsesRMRD:
 
     @classmethod
     def to_CType(
-        cls, param_cont: ParamContainer, pyval: tuple | list | np.ndarray
+        cls, arg_cont: ArgContainer, pyval: tuple | list | np.ndarray
     ) -> RawRMRD:
         """
         Accepts any value that is numpy.ndarray.
@@ -177,7 +177,7 @@ class UsesRMRD:
                     f"{cls.__qualname__}. Supported types include numpy.ndarray"
                 )
             case np.ndarray():
-                return cls._ndarray_to_CType(param_cont, pyval)
+                return cls._ndarray_to_CType(arg_cont, pyval)
             case _:
                 raise TypeError(
                     f"{type(pyval)} cannot be casted into a {cls.__qualname__}"
@@ -185,10 +185,10 @@ class UsesRMRD:
 
     @classmethod
     def from_CType(
-        cls, param_cont: ParamContainer, ct: "CTypeTree"
+        cls, arg_cont: ArgContainer, ct: "CTypeTree"
     ) -> np.ndarray:
         # This requires element_type to be representable with a single ctypes element
-        rmd = RankedMemRefDescriptor.from_CType(param_cont, ct)
+        rmd = RankedMemRefDescriptor.from_CType(arg_cont, ct)
         element_ctype = cls.element_type.CType()[0]
         element_size = ctypes.sizeof(element_ctype)
         ptr = rmd.aligned_ptr  # No nice way to do this in one line it seems
@@ -207,10 +207,10 @@ class UsesRMRD:
             flat_arr, shape=rmd.shape, strides=byte_strides
         )
 
-        # If arr overlaps with any ndarray that was a parameter of the
+        # If arr overlaps with any ndarray that was a aargument of the
         # function, construct it from that instead so we have a pointer to the
         # original ndarray and it doesn't deallocate the memory
-        base_arr = param_cont.get_overlap(arr)
+        base_arr = arg_cont.get_overlap(arr)
 
         if base_arr is not None:
             # Use the buffer base_arr.data then apply the correct offset,
@@ -252,7 +252,7 @@ class UsesRMRD:
 
     @classmethod
     def _ndarray_to_CType(
-        cls, param_cont: ParamContainer, a: np.ndarray
+        cls, arg_cont: ArgContainer, a: np.ndarray
     ) -> RawRMRD:
         ndtype = cls.element_type.CType()
         if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
@@ -299,8 +299,8 @@ class UsesRMRD:
             strides=[s // a.itemsize for s in a.strides],
         )
 
-        param_cont.add_param(a)
-        return RankedMemRefDescriptor.to_CType(param_cont, rmd)
+        arg_cont.add_arg(a)
+        return RankedMemRefDescriptor.to_CType(arg_cont, rmd)
 
     @classmethod
     def PolyCType(cls) -> tuple[mlir.Type]:
@@ -320,8 +320,8 @@ class UsesRMRD:
         )
 
     @classmethod
-    def _arraylike_to_CType(cls, param_cont: ParamContainer, li) -> RawRMRD:
-        return cls._ndarray_to_CType(param_cont, np.asarray(li))
+    def _arraylike_to_CType(cls, arg_cont: ArgContainer, li) -> RawRMRD:
+        return cls._ndarray_to_CType(arg_cont, np.asarray(li))
 
     @classmethod
     def rank(cls) -> int:
@@ -815,7 +815,7 @@ def slices_to_mlir_format(
             size_list.append(lower_single(Index(1)))
             step_list.append(lower_single(Index(1)))
         elif isinstance(key, Slice):
-            lo, size, step = key.get_params(Index(runtime_shape[i]))
+            lo, size, step = key.get_args(Index(runtime_shape[i]))
             lo_list.append(lower_single(lo))
             size_list.append(lower_single(size))
             step_list.append(lower_single(step))

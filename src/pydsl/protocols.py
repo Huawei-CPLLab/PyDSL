@@ -365,11 +365,11 @@ class ToMLIRBase(NodeVisitor):
 
 
 # TODO: what file to put this in? I had it in frontend.py initially, then
-# realized many files need to import ParamContainer, which would result in
+# realized many files need to import ArgContainer, which would result in
 # cyclic import error, since frontend imports numerous pydsl things.
-class ParamContainer:
+class ArgContainer:
     """
-    A container for storing parameters passed to a function.
+    A container for storing arguments passed to a function.
 
     The current usecase is for it to store any numpy.ndarrays that are passed
     to a function, so that when we return from the function and create new
@@ -378,11 +378,11 @@ class ParamContainer:
     deallocating the memory.
 
     In the future, maybe we can expand this class to store more information
-    about parameters if it's useful.
+    about arguments if it's useful.
 
     This class is intended to be passed to all to_CType and from_CType calls.
     Note that we could not do input/output ndarray overlap analysis at the
-    outer level where we call the function, since function parameters and
+    outer level where we call the function, since function arguments and
     return values can be complicated nested types.
     """
 
@@ -391,9 +391,9 @@ class ParamContainer:
     def __init__(self):
         self.ndarray_list = []
 
-    def add_param(self, param: Any):
-        if isinstance(param, np.ndarray):
-            self.ndarray_list.append(param)
+    def add_arg(self, arg: Any):
+        if isinstance(arg, np.ndarray):
+            self.ndarray_list.append(arg)
 
     @staticmethod
     def _get_ndarray_root(arr: np.ndarray) -> np.ndarray:
@@ -428,11 +428,11 @@ class ParamContainer:
         """
         result = None
 
-        for param_arr in self.ndarray_list:
-            if not np.may_share_memory(arr, param_arr):
+        for arg_arr in self.ndarray_list:
+            if not np.may_share_memory(arr, arg_arr):
                 continue
 
-            root = self._get_ndarray_root(param_arr)
+            root = self._get_ndarray_root(arg_arr)
             if not np.may_share_memory(arr, root):
                 continue
 
