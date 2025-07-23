@@ -1,5 +1,7 @@
+import numpy as np
 from pydsl.frontend import compile
-from pydsl.type import SInt16, UInt16
+from pydsl.memref import MemRef
+from pydsl.type import SInt16, UInt16, Tuple
 from helper import compilation_failed_from, run
 
 
@@ -32,7 +34,40 @@ def test_assign_implicit_type():
     assert r"arith.constant 5 : i16" in mlir
 
 
+def test_assign_tuple():
+    @compile()
+    def f() -> Tuple[SInt16, SInt16]:
+        a, b = 7, 3
+        return a, b
+
+    assert f() == (7, 3)
+
+
+def test_chain_assign():
+    @compile()
+    def f() -> Tuple[SInt16, UInt16]:
+        a = b = 8
+        return a, b
+
+    assert f() == (8, 8)
+
+
+def test_chain_assign_mixed():
+    @compile()
+    def f(m1: MemRef[SInt16, 5]) -> Tuple[SInt16, SInt16]:
+        a, b = (m1[2], m1[4]) = c = 2, 8
+        d, e = c
+        res1 = a + m1[2] + d
+        res2 = b + m1[4] + e
+        return res1, res2
+
+    assert f(np.zeros((5,), dtype=np.int16)) == (2 + 2 + 2, 8 + 8 + 8)
+
+
 if __name__ == "__main__":
     run(test_annassign)
     run(test_illegal_annassign)
     run(test_assign_implicit_type)
+    run(test_assign_tuple)
+    run(test_chain_assign)
+    run(test_chain_assign_mixed)
