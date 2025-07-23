@@ -87,7 +87,7 @@ Some notes:
 - PyDSL has strict typing. All arguments, return value, and constant initiations must be type-hinted.
     - PyDSL accepts only its own types. This is to enforce the fact that you are using MLIR types and need to convert Python types into it when calling the function. Do not use int, float, etc. Instead, use `pydsl.type.F32`, etc.
 - `@compile()` automatically pushes the variables defined prior to the decorator into the compiler so that the user can use these variables within the function. This is simply a dictionary of variables. The user can override this behavior by passing any dictionary mapping names to values into the first positional argument of `@compile()`.
- - This value-pushing behavior does its best to capture as much relevant contextual variable as possible. By default, this is `builtins | globals | locals`, where `|` is the dictionary union operation. However, this does not exhibit the same behavior as a regular Python function, which also graduate any used variables from outer nested functions into `locals`. This feature is missing from Python's metaprogramming API and there is no way to perfectly emulate Python's behavior.
+    - This value-pushing behavior does its best to capture as much relevant contextual variable as possible. By default, this is `builtins | globals | locals`, where `|` is the dictionary union operation. However, this does not exhibit the same behavior as a regular Python function, which also graduate any used variables from outer nested functions into `locals`. This feature is missing from Python's metaprogramming API and there is no way to perfectly emulate Python's behavior.
 - A lot of Python's built-in variables need to be shadowed with its PyDSL equivalent by importing them, such as `range`. This means that you can no longer use Python's own `range` in your Python script.
     - If you do not wish to overshadow Python's own built-in variables, you can name the import differently, e.g. `from pydsl.scf import range as srange` and use `srange` as `range` in your function
 - After the function is defined, the compilation is automatically performed. When you call `hello`, you are actually running a compiled library.
@@ -273,7 +273,7 @@ a: I32 = 5
 a = I32(5)
 
 # Have the compiler evaluate the type of this constant lazily
-a = 5 
+a = 5
 ```
 
 Using type as a function can help with situations where you need to quickly define a variable, such as in `range` which only accepts index types.
@@ -464,7 +464,7 @@ print(n)  # [8]
 ```
 
 Some notes:
-- `MemRef64` is a type that is defined dynamically outside of the compiled function using `MemRefFactory`. It specifies a memory region of a single element requiring a dtype of UInt64.
+- `MemRef64` is a type that is defined dynamically outside of the compiled function using `MemRefFactory`. It specifies a memory region of a single element requiring a `dtype` of `UInt64`.
 - You **must** pass in a Numpy array with the correct type and dimension. The function will not accept any other iterables or arrays with the wrong type. We cannot cast your array for you as most Numpy casting requires a new copy of the array to be created, which your code would not have a reference of.
 
 > ⚠️ **WARNING:** DO NOT PASS IN A NUMPY ARRAY WITHOUT HOLDING ONTO AT LEAST ONE REFERENCE OF IT IN PYTHON.
@@ -519,7 +519,7 @@ MemRef64 = MemRefFactory((1), UInt32)
 MemRef64 = MemRefFactory((1,), UInt32)
 ```
 
- When inlining the dimension as type hints, the element type comes before dimension, and dimension is written as comma-separated rather than as a tuple. 
+When inlining the dimension as type hints, the element type comes before dimension, and dimension is written as comma-separated rather than as a tuple.
 
 ```py
 # When using inline type hint, dimension comes after and tuple is not used.
@@ -961,8 +961,7 @@ def lower_flatten(li: list[Lowerable]) -> list:
 
 Lowering of values is facilitated by `lower`, `lower_single`, and `lower_flatten`. Given an input `v`, `lower` calls `v.lower` if `v` is an instance, or `v.lower_class` if `v` is a wrapper class, as such:
 - `lower(Index)` should be equivalent to `(IndexType.get(),)`
-- `lower(Index(5))` should be equivalent to
-  `(ConstantOp(IndexType.get(), 5).results,)`
+- `lower(Index(5))` should be equivalent to `(ConstantOp(IndexType.get(), 5).results,)`
 
 `lower_single` is a shorthand that strips the lowered result of its tuple, assuming the tuple wraps a single element.
 
