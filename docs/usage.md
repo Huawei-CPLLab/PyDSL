@@ -467,27 +467,6 @@ Some notes:
 - `MemRef64` is a type that is defined dynamically outside of the compiled function using `MemRefFactory`. It specifies a memory region of a single element requiring a `dtype` of `UInt64`.
 - You **must** pass in a Numpy array with the correct type and dimension. The function will not accept any other iterables or arrays with the wrong type. We cannot cast your array for you as most Numpy casting requires a new copy of the array to be created, which your code would not have a reference of.
 
-> ⚠️ **WARNING:** DO NOT PASS IN A NUMPY ARRAY WITHOUT HOLDING ONTO AT LEAST ONE REFERENCE OF IT IN PYTHON.
-> - if you create and pass in the numpy array directly, it will be deallocated automatically by Numpy and PyDSL will be left writing to a dangling pointer!
-> - we're currently looking for a solution to override this behavior
-
-Here is an example of what **NOT TO DO**. This would return an array pointing to garbage and may even risk segmentation fault.
-```py
-MemRef64 = MemRefFactory((64, 64), UInt32)
-
-@compile(locals(), dump_mlir=True)
-def hello(m: MemRef64) -> MemRef64:
-    for i in range(Index(3), Index(7), Index(2)):
-        m[Index(0), Index(0)] = m[Index(0), Index(0)] + UInt32(i)
-    
-    return m
-
-# DO NOT PASS IN THE ARRAY DIRECTLY LIKE THIS!
-res = hello(np.zeros((64, 64), dtype=np.uint32))  # This could just segfault
-
-print(res) # Garbage array if hello didn't segfault
-```
-
 The alternative to using a NumPy array is to allocate memory directly in PyDSL. The library currently offers `pydsl.memref.alloc` (heap allocation) and `pydsl.memref.alloca` (stack allocation). Deallocation is supported via `pydsl.memref.dealloc`. The MemRef variables may be returned to the Python caller, which are automatically casted as a NumPy array.
 
 ```py

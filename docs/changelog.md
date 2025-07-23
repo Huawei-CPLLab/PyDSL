@@ -1,24 +1,16 @@
-# 2025 July 18: Slicing Update
+# 2025 July 23: `ndarray` Linking
 
-## Tensor updates
+`ndarray`s returned from a function now store a pointer to the root of
+`ndarrays`s passed to the function if they overlap in memory to prevent the
+memory from being deallocated.
+It should now be possible to pass `ndarray`s to a function without having to
+keep a reference to them!
 
-- Added support for slicing of `Tensor` and `MemRef`.
-  - Added support for indexing `Tensor`, although not yet affine indexing.
-- Added support for strided `MemRef`s.
-- **[Not backwards compatible]** Changed `Tensor` and `MemRef` subclass name to
-be a keyword-only argument of the class factories
-- **[Not backwards compatible]** New `Tensor` passed as function argument policy:
-the function may produce MLIR that modifies the passed-in numpy array in place
-see the documentation.
-- Added Tensor class slicing support to declare tensor types
-
-## Other
-
-- Swtiched to LLVM version 19.
-  - **[Not backwards compatible]** Temporarily removed `AffineIf` support,
-  since this needs Python bindings from LLVM 20.
-- Link with `libmlir_c_runner_utils.so` to work properly on CPU.
-  - Updated build intructions.
+Internally, we assume that for any `ndarray`, you can repeatedly take its
+`.base` to eventually get an `ndarray` that owns its memory, has C contiguous
+memory, and the returned `ndarray` is fully contained in a single such root
+array.
+If you know a not stupid way this can be false, please let us know.
 
 # 2025 July 21: CallMacro Improvements
 
