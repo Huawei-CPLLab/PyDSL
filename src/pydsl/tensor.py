@@ -61,7 +61,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     @staticmethod
     @cache
     def class_factory(
-        shape: tuple[int], element_type, name=_default_subclass_name
+        shape: tuple[int], element_type, *, name=_default_subclass_name
     ):
         """
         Create a new subclass of Tensor dynamically with the specified
