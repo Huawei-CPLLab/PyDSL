@@ -1,7 +1,9 @@
 import math
-
+import gc
+import weakref
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
+
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
 from pydsl.memref import DYNAMIC, Dynamic, MemRef, MemRefFactory, alloca, alloc
@@ -9,6 +11,8 @@ import pydsl.linalg as linalg
 from pydsl.type import F32, F64, Bool, Index, Tuple, UInt32, SInt16
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
+MemRefI16_2 = MemRef.get_fully_dynamic(SInt16, 2)
+MemRefU32_1 = MemRef.get_fully_dynamic(UInt32, 1)
 MemRefF32_2 = MemRef.get_fully_dynamic(F32, 2)
 MemRefF64_4 = MemRef.get_fully_dynamic(F64, 4)
 
@@ -335,6 +339,102 @@ def test_load_slice_store():
     assert (n2 == n1).all()
 
 
+def test_link_ndarray():
+    """
+    Test whether pointers are correctly attached to ndarrays returned from a
+    function if they overlap with input ndarrays.
+    """
+
+    def get_root(arr: np.ndarray):
+        while arr.base is not None:
+            arr = arr.base
+        return arr
+
+    @compile()
+    def f(m1: MemRefU32_1, m2: MemRefU32_1) -> Tuple[MemRefU32_1, MemRefU32_1]:
+        res1 = m1[123::3]
+        res2 = m2
+        return (res1, res2)
+
+    # First, check what happens when m1 and m2 are derived from different roots
+    n1 = multi_arange((1000,), np.uint32)
+    n2 = multi_arange((500,), np.uint32) + 1234
+    cor_res1 = n1.copy()[123::3]
+    cor_res2 = n2.copy()
+    res1, res2 = f(n1, n2)
+    n1_root_ref = weakref.ref(get_root(n1))
+    n2_root_ref = weakref.ref(get_root(n2))
+
+    n1 = None
+    n2 = None
+    gc.collect()
+    assert n1_root_ref() is not None
+    assert n2_root_ref() is not None
+    assert (res1 == cor_res1).all()
+    assert (res2 == cor_res2).all()
+
+    res1 = None
+    gc.collect()
+    assert n1_root_ref() is None
+    assert n2_root_ref() is not None
+
+    res2 = None
+    gc.collect()
+    assert n1_root_ref() is None
+    assert n2_root_ref() is None
+
+    # Now check what happens if m1 and m2 are derived from the same ndarray
+    n3 = multi_arange((1000,), np.uint32) + 8765
+    cor_res3 = n3.copy()[1::5][123::3]
+    cor_res4 = n3.copy()[2::5]
+    res3, res4 = f(n3[1::5], n3[2::5])
+    n3_root_ref = weakref.ref(get_root(n3))
+
+    n3 = None
+    gc.collect()
+    assert n3_root_ref() is not None
+    assert (res3 == cor_res3).all()
+    assert (res4 == cor_res4).all()
+
+    res3 = None
+    gc.collect()
+    assert n3_root_ref() is not None
+
+    res4 = None
+    gc.collect()
+    assert n3_root_ref() is None
+
+
+def test_chain_link_ndarray():
+    """
+    Check if the ndarray returned by a PyDSL function can be passed to another
+    PyDSL function and still result in correct deallocation prevention
+    references.
+    """
+
+    def get_root(arr: np.ndarray):
+        while arr.base is not None:
+            arr = arr.base
+        return arr
+
+    @compile()
+    def f(m1: MemRefI16_2) -> MemRefI16_2:
+        return m1[1:, 1:]
+
+    n1 = multi_arange((10, 10), np.int16)
+    res = f(f(f(n1)))
+    n1_ref = weakref.ref(get_root(n1))
+    assert (res == n1[3:, 3:]).all()
+
+    n1 = None
+    gc.collect()
+    assert n1_ref() is not None
+
+    res = None
+    gc.collect()
+    assert n1_ref() is None
+
+
 if __name__ == "__main__":
     run(test_load_implicit_index_uint32)
     run(test_load_implicit_index_f64)
@@ -355,3 +455,5 @@ if __name__ == "__main__":
     run(test_load_slice)
     run(test_load_compose_strided)
     run(test_load_slice_store)
+    run(test_link_ndarray)
+    run(test_chain_link_ndarray)

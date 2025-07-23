@@ -1,3 +1,5 @@
+import gc
+import weakref
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
@@ -249,6 +251,40 @@ def test_arg_copy():
     assert (test_res == n1).all()
 
 
+def test_link_ndarray():
+    """
+    Relatively simple check to make sure that a returned Tensor has a pointer
+    to an input tensor if they overlap. test_memref has a more comprehensive
+    test.
+    """
+
+    def get_root(arr: np.ndarray):
+        while arr.base is not None:
+            arr = arr.base
+        return arr
+
+    @compile()
+    def f(t1: Tensor[F64, 64, 64]) -> TensorF64_2:
+        t1[5, 10] = 12345
+        return t1[5:40:7, 8::2]
+
+    n1 = multi_arange((64, 64), np.float64)
+    cor_res = n1.copy()
+    cor_res[5, 10] = 12345
+    cor_res = cor_res[5:40:7, 8::2]
+    res1 = f(n1)
+    assert (res1 == cor_res).all()
+
+    n1_root_ref = weakref.ref(get_root(n1))
+    n1 = None
+    gc.collect()
+    assert n1_root_ref() is not None
+
+    res1 = None
+    gc.collect()
+    assert n1_root_ref() is None
+
+
 if __name__ == "__main__":
     run(test_wrong_dim)
     run(test_load)
@@ -267,3 +303,4 @@ if __name__ == "__main__":
     run(test_store_slice_exp)
     run(test_strided_ndarray_to_tensor)
     run(test_arg_copy)
+    run(test_link_ndarray)
