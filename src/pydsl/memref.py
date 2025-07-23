@@ -8,7 +8,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 import mlir.ir as mlir
-import numpy
+import numpy as np
 from mlir.dialects import affine, memref
 from mlir.ir import (
     DenseI64ArrayAttr,
@@ -20,7 +20,7 @@ from mlir.ir import (
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
 from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.protocols import SubtreeOut, ToMLIRBase, lower
+from pydsl.protocols import ArgContainer, SubtreeOut, ToMLIRBase, lower
 from pydsl.type import (
     Index,
     Lowerable,
@@ -46,17 +46,6 @@ RuntimeMemrefShape = list[int | Value]
 # based on example in PEP 646: https://peps.python.org/pep-0646/
 DType = typing.TypeVar("DType")
 Shape = typing.TypeVarTuple("Shape")
-
-
-@runtime_checkable
-class SupportsRMRD(Protocol):
-    """
-    Classes that supports converting to a RankedMemRefDescriptor
-    """
-
-    def RankedMemRefDescriptor(
-        self, target_type: type["MemRef"]
-    ) -> "RankedMemRefDescriptor": ...
 
 
 @dataclass
@@ -119,9 +108,6 @@ class RankedMemRefDescriptor:
 
         return len(self.shape)
 
-    def out_CType_of_MemRef(cls: type["MemRef"]) -> tuple:
-        return (RankedMemRefDescriptor.generate_struct(cls.rank()),)
-
     def CType_of_MemRef(cls: type["MemRef"]) -> tuple:
         return (
             c_void_p,
@@ -131,14 +117,20 @@ class RankedMemRefDescriptor:
             (Index.CType()[0] * len(cls.shape)),
         )
 
-    def as_CType(self) -> "CTypeTree":
-        return (*self,)
+    @classmethod
+    def to_CType(
+        cls, arg_cont: ArgContainer, pyval: "RankedMemRefDescriptor"
+    ) -> "CTypeTree":
+        arg_cont.add_arg(pyval)
+        return (*pyval,)
 
     @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> "RankedMemRefDescriptor":
-        allo, align, offset, shape, strides = ct
+    def from_CType(
+        cls, arg_cont: ArgContainer, ct: "CTypeTree"
+    ) -> "RankedMemRefDescriptor":
+        alloc, align, offset, shape, strides = ct
         return RankedMemRefDescriptor(
-            allocated_ptr=c_void_p(allo),
+            allocated_ptr=c_void_p(alloc),
             aligned_ptr=c_void_p(align),
             offset=offset,
             shape=tuple(shape),
@@ -148,7 +140,7 @@ class RankedMemRefDescriptor:
 
 class UsesRMRD:
     """
-    A mixin class for adding CType support for classes that eventually lowers
+    A mixin class for adding CType support for classes that eventually lower
     down to a ranked MemRef descriptor in LLVM C calling convention.
 
     This mostly exists to reduce code duplication.
@@ -173,17 +165,10 @@ class UsesRMRD:
 
     @classmethod
     def to_CType(
-        cls, pyval: typing.Union[tuple, list, numpy.ndarray, "SupportsRMRD"]
+        cls, arg_cont: ArgContainer, pyval: tuple | list | np.ndarray
     ) -> RawRMRD:
         """
-        Accepts any value that is numpy.ndarray or convertible
-        to RankedMemRefDescriptor.
-
-        The elements are restricted as such:
-        - if the expected element's CType is int or float, then the input must
-          be int or float, respectively
-        - if the expected element's CType is a tuple of CTypes, then an error
-          is thrown
+        Accepts any value that is numpy.ndarray.
         """
         match pyval:
             case tuple() | list():
@@ -191,20 +176,19 @@ class UsesRMRD:
                     f"{type(pyval)} cannot be casted into a "
                     f"{cls.__qualname__}. Supported types include numpy.ndarray"
                 )
-            case numpy.ndarray():
-                return cls._ndarray_to_CType(pyval)
-            case SupportsRMRD():
-                return pyval.RankedMemRefDescriptor(cls).as_CType()
+            case np.ndarray():
+                return cls._ndarray_to_CType(arg_cont, pyval)
             case _:
                 raise TypeError(
-                    f"{type(pyval)} cannot be casted into a "
-                    f"{cls.__qualname__}"
+                    f"{type(pyval)} cannot be casted into a {cls.__qualname__}"
                 )
 
     @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> numpy.ndarray:
+    def from_CType(
+        cls, arg_cont: ArgContainer, ct: "CTypeTree"
+    ) -> np.ndarray:
         # This requires element_type to be representable with a single ctypes element
-        rmd = RankedMemRefDescriptor.from_CType(ct)
+        rmd = RankedMemRefDescriptor.from_CType(arg_cont, ct)
         element_ctype = cls.element_type.CType()[0]
         element_size = ctypes.sizeof(element_ctype)
         ptr = rmd.aligned_ptr  # No nice way to do this in one line it seems
@@ -216,15 +200,32 @@ class UsesRMRD:
         )
         byte_strides = [s * element_size for s in rmd.strides]
         # Load as a 1D array first, then apply the correct shape and strides
-        flat_arr = numpy.ctypeslib.as_array(
+        flat_arr = np.ctypeslib.as_array(
             ctypes.cast(ptr, POINTER(element_ctype)), shape=(max_size,)
         )
-        return numpy.lib.stride_tricks.as_strided(
+        arr = np.lib.stride_tricks.as_strided(
             flat_arr, shape=rmd.shape, strides=byte_strides
         )
 
+        # If arr overlaps with any ndarray that was a aargument of the
+        # function, construct it from that instead so we have a pointer to the
+        # original ndarray and it doesn't deallocate the memory
+        base_arr = arg_cont.get_overlap(arr)
+
+        if base_arr is not None:
+            # Use the buffer base_arr.data then apply the correct offset,
+            # shape, and strides. buf has a pointer to base_arr, and the new
+            # ndarray will also have this pointer when constructed from buf
+            buf = base_arr.data
+            base_ptr = base_arr.ctypes.data_as(c_void_p)
+            offs = int(ptr.value) - int(base_ptr.value)
+            arr = np.ndarray(rmd.shape, arr.dtype, buf, offs, byte_strides)
+            assert id(arr.base) == id(base_arr)
+
+        return arr
+
     @classmethod
-    def same_shape(cls, x: numpy.ndarray) -> bool:
+    def same_shape(cls, x: np.ndarray) -> bool:
         """
         Returns true if x's shape is the same as the MemRef's.
         """
@@ -234,7 +235,7 @@ class UsesRMRD:
         ])
 
     @classmethod
-    def same_strides(cls, x: numpy.ndarray) -> bool:
+    def same_strides(cls, x: np.ndarray) -> bool:
         """
         Returns true if x's strides are the same as the MemRef's.
         """
@@ -250,7 +251,9 @@ class UsesRMRD:
             ])
 
     @classmethod
-    def _ndarray_to_CType(cls, a: numpy.ndarray) -> RawRMRD:
+    def _ndarray_to_CType(
+        cls, arg_cont: ArgContainer, a: np.ndarray
+    ) -> RawRMRD:
         ndtype = cls.element_type.CType()
         if len(ndtype) > 1:  # TODO: ideally, this tuple is also flattened
             raise TypeError(
@@ -258,7 +261,7 @@ class UsesRMRD:
                 f"composite CType"
             )
 
-        if (actual_dt := numpy.ctypeslib.as_ctypes_type(a.dtype)) is not (
+        if (actual_dt := np.ctypeslib.as_ctypes_type(a.dtype)) is not (
             expected_dt := ndtype[0]
         ):
             raise TypeError(
@@ -296,7 +299,8 @@ class UsesRMRD:
             strides=[s // a.itemsize for s in a.strides],
         )
 
-        return rmd.as_CType()
+        arg_cont.add_arg(a)
+        return RankedMemRefDescriptor.to_CType(arg_cont, rmd)
 
     @classmethod
     def PolyCType(cls) -> tuple[mlir.Type]:
@@ -304,22 +308,20 @@ class UsesRMRD:
         return (c_void_p,)
 
     @classmethod
-    def to_PolyCType(
-        cls, pyval: typing.Union[tuple, list, numpy.ndarray, "SupportsRMRD"]
-    ) -> RawRMRD:
+    def to_PolyCType(cls, pyval: tuple | list | np.ndarray) -> RawRMRD:
         # the 0th index is the pointer to the memory location, which is the
         # only thing Poly accepts
         return (cls.to_CType(pyval)[0],)
 
     @classmethod
-    def from_PolyCType(cls, ct: "CTypeTree") -> numpy.ndarray:
+    def from_PolyCType(cls, ct: "CTypeTree") -> np.ndarray:
         raise RuntimeError(
             "PolyCType MemRef pointers cannot be converted into NumPy NDArray"
         )
 
     @classmethod
-    def _arraylike_to_CType(cls, li) -> RawRMRD:
-        return cls._ndarray_to_CType(numpy.asarray(li))
+    def _arraylike_to_CType(cls, arg_cont: ArgContainer, li) -> RawRMRD:
+        return cls._ndarray_to_CType(arg_cont, np.asarray(li))
 
     @classmethod
     def rank(cls) -> int:
@@ -813,7 +815,7 @@ def slices_to_mlir_format(
             size_list.append(lower_single(Index(1)))
             step_list.append(lower_single(Index(1)))
         elif isinstance(key, Slice):
-            lo, size, step = key.get_params(Index(runtime_shape[i]))
+            lo, size, step = key.get_args(Index(runtime_shape[i]))
             lo_list.append(lower_single(lo))
             size_list.append(lower_single(size))
             step_list.append(lower_single(step))

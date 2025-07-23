@@ -1,5 +1,6 @@
 import ast
 import typing
+import numpy as np
 from ast import NodeVisitor
 from collections.abc import Callable, Iterable
 from functools import reduce
@@ -361,3 +362,85 @@ class ToMLIRBase(NodeVisitor):
     # `Lowerable`
     def visit(self, node: ast.AST | Lowerable) -> SubtreeOut:
         return super().visit(node)
+
+
+# TODO: what file to put this in? I had it in frontend.py initially, then
+# realized many files need to import ArgContainer, which would result in
+# cyclic import error, since frontend imports numerous pydsl things.
+class ArgContainer:
+    """
+    A container for storing arguments passed to a function.
+
+    The current usecase is for it to store any numpy.ndarrays that are passed
+    to a function, so that when we return from the function and create new
+    ndarrays possibly referring to the same memory locations as existing ones,
+    we can add a pointer from the new ndarray to the old one to prevent it from
+    deallocating the memory.
+
+    In the future, maybe we can expand this class to store more information
+    about arguments if it's useful.
+
+    This class is intended to be passed to all to_CType and from_CType calls.
+    Note that we could not do input/output ndarray overlap analysis at the
+    outer level where we call the function, since function arguments and
+    return values can be complicated nested types.
+    """
+
+    ndarray_list: list[np.ndarray]
+
+    def __init__(self):
+        self.ndarray_list = []
+
+    def add_arg(self, arg: Any):
+        if isinstance(arg, np.ndarray):
+            self.ndarray_list.append(arg)
+
+    @staticmethod
+    def _get_ndarray_root(arr: np.ndarray) -> np.ndarray:
+        """
+        Try to get the root of an ndarray by repeatedly taking its base
+        pointer. This should result in an array that owns its memory and its
+        memory is contiguous.
+        """
+        seen = set()
+        while arr.base is not None:
+            if id(arr) in seen:
+                raise AssertionError("found ndarray with cyclic base pointers")
+            seen.add(id(arr))
+            arr = arr.base
+
+        if not arr.flags["C_CONTIGUOUS"]:
+            raise AssertionError(
+                "found ndarray that has no base array but is not C contiguous"
+            )
+
+        return arr
+
+    def get_overlap(self, arr: np.ndarray) -> np.ndarray | None:
+        """
+        Compares arr with any ndarrays stored in this container to check if
+        their memories overlap. If any such arrays exist, finds their root
+        (the ndarray which allocated the memory) and returns that. Otherwise,
+        returns None. If numpy and MLIR work the way we expect them to and the
+        user is not doing crazy things, there should be at most one overlapping
+        root array, it should have contiguous memory, and it should fully
+        contain arr.
+        """
+        result = None
+
+        for arg_arr in self.ndarray_list:
+            if not np.may_share_memory(arr, arg_arr):
+                continue
+
+            root = self._get_ndarray_root(arg_arr)
+            if not np.may_share_memory(arr, root):
+                continue
+
+            if result is None:
+                result = root
+            elif id(root) != id(result):
+                raise AssertionError(
+                    "array overlaps with multiple root arrays"
+                )
+
+        return result

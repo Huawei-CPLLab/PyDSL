@@ -1,3 +1,5 @@
+import gc
+import weakref
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
@@ -21,7 +23,7 @@ TensorU64_2 = TensorFactory((DYNAMIC, DYNAMIC), UInt64)
 
 def test_wrong_dim():
     @compile()
-    def f(m1: Tensor[F64, 8, 5, 6]):
+    def f(t1: Tensor[F64, 8, 5, 6]):
         pass
 
     with failed_from(TypeError):
@@ -35,8 +37,8 @@ def test_wrong_dim():
 
 def test_load():
     @compile()
-    def f(m1: Tensor[SInt32, 2, 3]) -> SInt32:
-        return m1[1, 2] + m1[0, 0]
+    def f(t1: Tensor[SInt32, 2, 3]) -> SInt32:
+        return t1[1, 2] + t1[0, 0]
 
     n1 = np.asarray([[1, 2, 4], [8, 16, 32]], dtype=np.int32)
     assert f(n1) == n1[1, 2] + n1[0, 0]
@@ -45,11 +47,11 @@ def test_load():
 def test_store():
     @compile()
     def f(
-        m1: Tensor[UInt64, 3, 2], a: UInt64, b: UInt64
+        t1: Tensor[UInt64, 3, 2], a: UInt64, b: UInt64
     ) -> Tensor[UInt64, 3, 2]:
-        m1[1, 0] = a
-        m1[2, 1] = b
-        return m1
+        t1[1, 0] = a
+        t1[2, 1] = b
+        return t1
 
     n1 = np.asarray([[1, 2], [3, 4], [5, 6]], dtype=np.uint64)
     cor_res = n1.copy()
@@ -60,8 +62,8 @@ def test_store():
 
 def test_load_slice_1d():
     @compile()
-    def f(m1: TensorF64_1) -> TensorF64_1:
-        return m1[2:9:3]
+    def f(t1: TensorF64_1) -> TensorF64_1:
+        return t1[2:9:3]
 
     n1 = multi_arange((10,), np.float64)
     assert (f(n1) == n1[2:9:3]).all()
@@ -69,8 +71,8 @@ def test_load_slice_1d():
 
 def test_load_slice_3d():
     @compile()
-    def f(m1: Tensor[SInt32, 10, 6, 8]) -> TensorI32_3:
-        return m1[1:7:3, 0:5:1, 1:6:2]
+    def f(t1: Tensor[SInt32, 10, 6, 8]) -> TensorI32_3:
+        return t1[1:7:3, 0:5:1, 1:6:2]
 
     n1 = multi_arange((10, 6, 8), np.int32)
     assert (f(n1) == n1[1:7:3, 0:5:1, 1:6:2]).all()
@@ -78,8 +80,8 @@ def test_load_slice_3d():
 
 def test_load_slice_implicit():
     @compile()
-    def f(m1: Tensor[F64, 5, 6, 7, 8]) -> TensorF64_4:
-        return m1[::, 2::2, 3]
+    def f(t1: Tensor[F64, 5, 6, 7, 8]) -> TensorF64_4:
+        return t1[::, 2::2, 3]
 
     n1 = multi_arange((5, 6, 7, 8), np.float64)
     assert (f(n1).squeeze() == n1[::, 2::2, 3]).all()
@@ -89,14 +91,14 @@ def test_load_slice_extra_dims():
     with compilation_failed_from(IndexError):
         # More indices than rank of tensor is not allowed
         @compile()
-        def f(m1: Tensor[UInt64, 10, 4]) -> TensorU64_2:
-            return m1[3::, 1:4, ::2]
+        def f(t1: Tensor[UInt64, 10, 4]) -> TensorU64_2:
+            return t1[3::, 1:4, ::2]
 
 
 def test_load_slice_exp():
     @compile()
-    def f(m1: Tensor[F64, 10, 10]) -> TensorF64_2:
-        return linalg.exp(m1[2:7:2, 3:])
+    def f(t1: Tensor[F64, 10, 10]) -> TensorF64_2:
+        return linalg.exp(t1[2:7:2, 3:])
 
     n1 = multi_arange((10, 10), np.float64)
     assert np.allclose(f(n1), np.exp(n1[2:7:2, 3:]))
@@ -104,9 +106,9 @@ def test_load_slice_exp():
 
 def test_load_compose_strided():
     @compile()
-    def f(m1: Tensor[F32, 16, 12]) -> TensorF32_2:
-        m2 = m1[1:15:2, ::3]
-        return m2[1::3, 1::2]
+    def f(t1: Tensor[F32, 16, 12]) -> TensorF32_2:
+        t2 = t1[1:15:2, ::3]
+        return t2[1::3, 1::2]
 
     n1 = multi_arange((16, 12), np.float32)
     n1_sub = n1[1:15:2, ::3][1::3, 1::2]
@@ -116,11 +118,11 @@ def test_load_compose_strided():
 def test_store_slice_1d_multi():
     @compile()
     def f(
-        m1: Tensor[SInt32, 8], m2: Tensor[SInt32, 2], m3: Tensor[SInt32, 3]
+        t1: Tensor[SInt32, 8], t2: Tensor[SInt32, 2], t3: Tensor[SInt32, 3]
     ) -> Tensor[SInt32, 8]:
-        m1[3:5] = m2
-        m1[1:7:2] = m3
-        return m1
+        t1[3:5] = t2
+        t1[1:7:2] = t3
+        return t1
 
     n1 = multi_arange((8,), np.int32)
     n2 = multi_arange((2,), np.int32) + 10
@@ -134,10 +136,10 @@ def test_store_slice_1d_multi():
 def test_store_slice_3d():
     @compile()
     def f(
-        m1: Tensor[F32, 8, 10, 12], m2: Tensor[F32, 3, 4, 5]
+        t1: Tensor[F32, 8, 10, 12], t2: Tensor[F32, 3, 4, 5]
     ) -> Tensor[F32, 8, 10, 12]:
-        m1[5:, ::3, 3:12:2] = m2
-        return m1
+        t1[5:, ::3, 3:12:2] = t2
+        return t1
 
     n1 = multi_arange((8, 10, 12), np.float32)
     n2 = multi_arange((3, 4, 5), np.float32) + 1000
@@ -149,14 +151,14 @@ def test_store_slice_3d():
 def test_store_slice_dynamic():
     @compile()
     def f(
-        m1: Tensor[F64, DYNAMIC, 5, DYNAMIC],
-        m2: Tensor[F64, DYNAMIC, DYNAMIC, 4],
+        t1: Tensor[F64, DYNAMIC, 5, DYNAMIC],
+        t2: Tensor[F64, DYNAMIC, DYNAMIC, 4],
         yLo: Index,
         yHi: Index,
         yStep: Index,
     ) -> Tensor[F64, DYNAMIC, 5, DYNAMIC]:
-        m1[2:7, yLo:yHi:yStep, :] = m2
-        return m1
+        t1[2:7, yLo:yHi:yStep, :] = t2
+        return t1
 
     n1 = multi_arange((10, 5, 4), np.float64)
     n2 = multi_arange((5, 3, 4), np.float64) + 1000
@@ -170,17 +172,17 @@ def test_store_slice_dif_dim():
 
         @compile()
         def f(
-            m1: Tensor[UInt64, 10, 4, 7], m2: Tensor[UInt64, 6, 2]
+            t1: Tensor[UInt64, 10, 4, 7], t2: Tensor[UInt64, 6, 2]
         ) -> Tensor[UInt64, 10, 4, 7]:
-            m1[0:6, 0:2] = m2
-            return m1
+            t1[0:6, 0:2] = t2
+            return t1
 
 
 def test_load_store_slice_self():
     @compile()
-    def f(m1: Tensor[F32, 10, 10]) -> Tensor[F32, 10, 10]:
-        m1[2:9:3, 3:6] = m1[4:7, 1:7:2]
-        return m1
+    def f(t1: Tensor[F32, 10, 10]) -> Tensor[F32, 10, 10]:
+        t1[2:9:3, 3:6] = t1[4:7, 1:7:2]
+        return t1
 
     n1 = multi_arange((10, 10), np.float32)
     cor_res = n1.copy()
@@ -191,10 +193,10 @@ def test_load_store_slice_self():
 def test_store_slice_exp():
     @compile()
     def f(
-        m1: Tensor[F64, 10, 10], m2: Tensor[F64, 7, 5]
+        t1: Tensor[F64, 10, 10], t2: Tensor[F64, 7, 5]
     ) -> Tensor[F64, 10, 10]:
-        m1[:7, 5:] = linalg.exp(m2)
-        return m1
+        t1[:7, 5:] = linalg.exp(t2)
+        return t1
 
     n1 = multi_arange((10, 10), np.float64) / 50
     n2 = multi_arange((7, 5), np.float64) / 49
@@ -208,11 +210,11 @@ def test_strided_ndarray_to_tensor():
     # memref<..., strided<[?, ?, ?], offset: ?>>
 
     @compile()
-    def f(m1: Tensor[SInt32, 12, DYNAMIC]) -> TensorI32_2:
-        m1[1, 2] = -1000
-        m1_sub = m1[1::2, 1:5]
-        m1_sub[3, 2] = -1001
-        return m1_sub
+    def f(t1: Tensor[SInt32, 12, DYNAMIC]) -> TensorI32_2:
+        t1[1, 2] = -1000
+        t1_sub = t1[1::2, 1:5]
+        t1_sub[3, 2] = -1001
+        return t1_sub
 
     i32_sz = np.int32().nbytes
     n1 = multi_arange((500,), np.int32)
@@ -234,11 +236,11 @@ def test_arg_copy():
     """
 
     @compile()
-    def f(m1: Tensor[SInt32, 10]) -> Tensor[SInt32, 10]:
-        m1[4] = 100
-        m1[8] = 101
-        m1[2:5] = m1[4:7]
-        return m1
+    def f(t1: Tensor[SInt32, 10]) -> Tensor[SInt32, 10]:
+        t1[4] = 100
+        t1[8] = 101
+        t1[2:5] = t1[4:7]
+        return t1
 
     n1 = multi_arange((10,), np.int32)
     n1_old = n1.copy()
@@ -247,6 +249,40 @@ def test_arg_copy():
     # Check if n1 was also updated
     assert not (n1 == n1_old).all()
     assert (test_res == n1).all()
+
+
+def test_link_ndarray():
+    """
+    Relatively simple check to make sure that a returned Tensor has a pointer
+    to an input tensor if they overlap. test_memref has a more comprehensive
+    test.
+    """
+
+    def get_root(arr: np.ndarray):
+        while arr.base is not None:
+            arr = arr.base
+        return arr
+
+    @compile()
+    def f(t1: Tensor[F64, 64, 64]) -> TensorF64_2:
+        t1[5, 10] = 12345
+        return t1[5:40:7, 8::2]
+
+    n1 = multi_arange((64, 64), np.float64)
+    cor_res = n1.copy()
+    cor_res[5, 10] = 12345
+    cor_res = cor_res[5:40:7, 8::2]
+    res1 = f(n1)
+    assert (res1 == cor_res).all()
+
+    n1_root_ref = weakref.ref(get_root(n1))
+    n1 = None
+    gc.collect()
+    assert n1_root_ref() is not None
+
+    res1 = None
+    gc.collect()
+    assert n1_root_ref() is None
 
 
 if __name__ == "__main__":
@@ -267,3 +303,4 @@ if __name__ == "__main__":
     run(test_store_slice_exp)
     run(test_strided_ndarray_to_tensor)
     run(test_arg_copy)
+    run(test_link_ndarray)

@@ -29,7 +29,7 @@ from mlir.ir import (
 )
 
 from pydsl.macro import CallMacro, MethodType, Uncompiled
-from pydsl.protocols import ToMLIRBase
+from pydsl.protocols import ToMLIRBase, ArgContainer
 
 if TYPE_CHECKING:
     # This is for imports for type hinting purposes only and which can result
@@ -456,7 +456,7 @@ class Int(metaclass=Supportable):
         raise TypeError(f"{cls.__name__} does not have a corresponding ctype")
 
     @classmethod
-    def to_CType(cls, pyval: Any):
+    def to_CType(cls, arg_cont: ArgContainer, pyval: Any):
         try:
             pyval = int(pyval)
         except Exception as e:
@@ -471,13 +471,14 @@ class Int(metaclass=Supportable):
 
         if cls.sign is Sign.UNSIGNED and pyval < 0:
             raise ValueError(
-                f"expected positive pyval for signless Int, got {pyval}"
+                f"expected positive pyval for unsigned Int, got {pyval}"
             )
 
+        arg_cont.add_arg(pyval)
         return (pyval,)
 
     @classmethod
-    def from_CType(cls, cval: "CTypeTree"):
+    def from_CType(cls, arg_cont: ArgContainer, cval: "CTypeTree"):
         return int(cval[0])
 
     @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
@@ -613,32 +614,6 @@ class Bool(Int, width=1, sign=Sign.UNSIGNED):
                 arith.ConstantOp(IntegerType.get_signless(1), 1).result,
             )
         )
-
-    @classmethod
-    def from_CType(cls, cval: "CTypeTree") -> bool:
-        return bool(cval[0])
-
-    @classmethod
-    def to_CType(cls, pyval: int | bool):
-        try:
-            pyval = bool(pyval)
-        except Exception as e:
-            raise TypeError(
-                f"{pyval} cannot be converted into a {cls.__name__} ctype. "
-                f"Reason: {e}"
-            )
-
-        return (pyval,)
-
-    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
-    def on_Call(
-        visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
-    ) -> Any:
-        match rep:
-            case ast.Constant():
-                return cls(rep.value)
-            case _:
-                return cls(visitor.visit(rep))
 
 
 AnyFloat = typing.TypeVar("AnyFloat", bound="Float")
@@ -806,7 +781,7 @@ class Float(metaclass=Supportable):
     out_CType = CType
 
     @classmethod
-    def to_CType(cls, pyval: float | int | bool):
+    def to_CType(cls, arg_cont: ArgContainer, pyval: float | int | bool):
         try:
             pyval = float(pyval)
         except Exception as e:
@@ -815,10 +790,11 @@ class Float(metaclass=Supportable):
                 f"{cls.__name__} ctype. Reason: {e}"
             )
 
+        arg_cont.add_arg(pyval)
         return (pyval,)
 
     @classmethod
-    def from_CType(cls, cval: "CTypeTree"):
+    def from_CType(cls, arg_cont: ArgContainer, cval: "CTypeTree"):
         return float(cval[0])
 
     @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
@@ -998,32 +974,6 @@ class Index(Int, width=get_index_width(), sign=Sign.UNSIGNED):
     @classmethod
     def PolyCType(cls) -> tuple[type]:
         return (ctypes.c_int,)
-
-    @classmethod
-    def to_CType(cls, pyval: float | int | bool) -> tuple[int]:
-        try:
-            pyval = int(pyval)
-        except Exception as e:
-            raise TypeError(
-                f"{pyval} cannot be converted into a {cls.__name__} "
-                f"ctype. Reason: {e}"
-            )
-
-        return (pyval,)
-
-    @classmethod
-    def from_CType(cls, cval: "CTypeTree") -> int:
-        return int(cval[0])
-
-    @CallMacro.generate(method_type=MethodType.CLASS_ONLY)
-    def on_Call(
-        visitor: "ToMLIRBase", cls: type[Self], rep: Uncompiled
-    ) -> Any:
-        match rep:
-            case ast.Constant():
-                return cls(rep.value)
-            case _:
-                return cls(visitor.visit(rep))
 
 
 # TODO: this class should be renamed to TransformAnyOp to avoid confusion
@@ -1347,13 +1297,13 @@ class Tuple(typing.Generic[*DTypes]):
         return tuple([d.CType() for d in cls.dtypes])
 
     @classmethod
-    def to_CType(cls, *_) -> typing.Never:
+    def to_CType(cls, arg_cont: ArgContainer, *_) -> typing.Never:
         raise TypeError("function arguments cannot have type Tuple")
 
     @classmethod
-    def from_CType(cls, ct: "CTypeTree") -> tuple:
+    def from_CType(cls, arg_cont: ArgContainer, ct: "CTypeTree") -> tuple:
         return tuple(
-            t.from_CType(sub_ct)
+            t.from_CType(arg_cont, sub_ct)
             for t, sub_ct in zip(cls.dtypes, ct, strict=False)
         )
 
@@ -1386,7 +1336,7 @@ class Slice:
         self.hi = hi
         self.step = step
 
-    def get_params(
+    def get_args(
         self, max_size: SupportsIndex
     ) -> tuple[Index, Index, Index]:
         """

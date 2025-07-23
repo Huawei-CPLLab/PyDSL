@@ -35,6 +35,7 @@ import numpy as np
 
 from pydsl.compiler import CompilationError, ToMLIR
 from pydsl.memref import DYNAMIC, MemRef
+from pydsl.protocols import ArgContainer
 
 
 def compose(funcs):
@@ -64,14 +65,16 @@ class SupportsCType(Protocol):
         ...
 
     @classmethod
-    def to_CType(cls: type, pyval: Any) -> CTypeTree:
+    def to_CType(
+        cls: type, arg_cont: ArgContainer, pyval: Any
+    ) -> CTypeTree:
         """
         Take a Python value and convert it to match the types of CType
         """
         ...
 
     @classmethod
-    def from_CType(cls: type, ct: CTypeTree) -> Any:
+    def from_CType(cls: type, arg_cont: ArgContainer, ct: CTypeTree) -> Any:
         """
         Take a tuple tree of ctypes value and convert it into a Python value
         """
@@ -677,18 +680,22 @@ compilation may fail entirely.
         return typ.CType()
 
     @classmethod
-    def val_to_CType(cls, typ: SupportsCType, val: Any) -> CTypeTree:
-        return typ.to_CType(val)
+    def val_to_CType(
+        cls, arg_cont: ArgContainer, typ: SupportsCType, val: Any
+    ) -> CTypeTree:
+        return typ.to_CType(arg_cont, val)
 
     @classmethod
-    def val_from_CType(cls, typ: SupportsCType, val: CTypeTree):
+    def val_from_CType(
+        cls, arg_cont: ArgContainer, typ: SupportsCType, val: CTypeTree
+    ):
         match val:
             case ():
                 # Outermost length is 0
                 return None
             case (val_sub,):
                 # Outermost length is 1
-                return typ.from_CType(val_sub)
+                return typ.from_CType(arg_cont, val_sub)
             case _:
                 raise ValueError("CType val must be a tuple of size 0 or 1")
 
@@ -757,8 +764,15 @@ compilation may fail entirely.
                 f"but {len(args)} were given"
             )
 
+        arg_cont = ArgContainer()
+
         mapped_args_ct = [
-            (ct, self.val_to_CType(sig.parameters[key].annotation, a))
+            (
+                ct,
+                self.val_to_CType(
+                    arg_cont, sig.parameters[key].annotation, a
+                ),
+            )
             for ct, key, a in zip(
                 self.get_args_ctypes(f), sig.parameters, args, strict=False
             )
@@ -789,7 +803,7 @@ compilation may fail entirely.
             if issubclass(f.return_type, Tuple):
                 retval_ct = (retval_ct,)
 
-            return self.val_from_CType(f.return_type, retval_ct)
+            return self.val_from_CType(arg_cont, f.return_type, retval_ct)
 
         # instantiate a structure return type, which by LLVM calling
         # convention is a void function that writes the return value in-place
@@ -803,7 +817,7 @@ compilation may fail entirely.
         # CTypes
         retval_ct = CTypeTree_from_Structure(self.get_return_ctypes(f), retval)
 
-        return self.val_from_CType(f.return_type, retval_ct)
+        return self.val_from_CType(arg_cont, f.return_type, retval_ct)
 
     def check_module_support(self) -> None:
         # NOTE: `transform` does NOT include `transform.validator` dialect

@@ -330,7 +330,7 @@ class CallMacro(Macro):
         the macro.
         """
         return NotImplemented
-    
+
     @abstractmethod
     def __call__() -> SubtreeOut:
         """
