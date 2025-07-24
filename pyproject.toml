@@ -32,7 +32,7 @@ addopts = [
     "--import-mode=importlib",
 ]
 pythonpath = [
-  ".", "src",
+  "src", "tests",
 ]
 
 [tool.ruff]
