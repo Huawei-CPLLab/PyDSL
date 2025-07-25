@@ -400,7 +400,7 @@ class ToMLIR(ToMLIRBase):
             case ast.BitXor():
                 return left.op_xor(right)
             case ast.BitOr():
-                return left.op_xor(right)
+                return left.op_or(right)
             case ast.And():
                 return left.op_and(right)
             case ast.Or():
