@@ -171,3 +171,7 @@ cython_debug/
 
 # Directory to test random things
 tmp/*
+
+# temporary files for CI
+.ci/llvm-project
+.ci/requirements.txt
