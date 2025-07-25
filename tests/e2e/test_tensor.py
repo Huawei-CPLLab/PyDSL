@@ -11,11 +11,11 @@ from pydsl.type import F64, F32, SInt32, UInt64, Index
 from pydsl.tensor import Tensor, TensorFactory
 from helper import failed_from, compilation_failed_from, multi_arange, run
 
-TensorF32_2 = TensorFactory((DYNAMIC, DYNAMIC), F32)
-TensorF32_3 = TensorFactory((DYNAMIC, DYNAMIC, DYNAMIC), F32)
-TensorI32_2 = TensorFactory((DYNAMIC, DYNAMIC), SInt32)
-TensorI32_3 = TensorFactory((DYNAMIC, DYNAMIC, DYNAMIC), SInt32)
-TensorF64_1 = TensorFactory((DYNAMIC,), F64)
+TensorF32_2 = Tensor[F32, DYNAMIC, DYNAMIC]
+TensorF32_3 = Tensor[F32, DYNAMIC, DYNAMIC, DYNAMIC]
+TensorI32_2 = Tensor[SInt32, DYNAMIC, DYNAMIC]
+TensorI32_3 = Tensor[SInt32, DYNAMIC, DYNAMIC, DYNAMIC]
+TensorF64_1 = Tensor[F64, DYNAMIC]
 TensorF64_2 = TensorFactory((DYNAMIC, DYNAMIC), F64)
 TensorF64_4 = TensorFactory((DYNAMIC, DYNAMIC, DYNAMIC, DYNAMIC), F64)
 TensorU64_2 = TensorFactory((DYNAMIC, DYNAMIC), UInt64)
