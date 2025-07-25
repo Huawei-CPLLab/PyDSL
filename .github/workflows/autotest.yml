@@ -1,0 +1,22 @@
+name: "AutoTest"
+
+on:
+  workflow_dispatch: # can trigger manually
+  pull_request: # can trigger on pull requests
+  push: # can trigger on pushes
+
+jobs:
+  autotest:
+    runs-on: ubuntu-latest
+    container:
+      image: pydsl/pydsl-ci:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Editable install
+        shell: bash
+        run: pip install -e .
+      - name: Run tests
+        shell: bash
+        run: |
+          hatch test
