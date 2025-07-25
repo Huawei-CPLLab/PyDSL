@@ -16,7 +16,9 @@ jobs:
       - name: Editable install
         shell: bash
         run: pip install -e .
-      - name: Run tests
+      - name: Run hatch test
         shell: bash
-        run: |
-          hatch test
+        run: hatch test
+      - name: Code Formatting check
+        shell: bash
+        run: hatch fmt -f --check
