@@ -535,13 +535,14 @@ class ToMLIR(ToMLIRBase):
         )
 
     def visit_Assign(self, node: ast.Assign) -> SubtreeOut:
-        # For some reason, node.targets has so far always been a list of
-        # length 1. To unwrap this unnecessary overhead, we just
-        # always pass in `node.targets[0]`.
+        value = self.visit(node.value)
 
-        # Specific logic is delegated to self.visit_assignment because
-        # this portion of the logic can be recursive.
-        return self.visit_assignment(node.targets[0], self.visit(node.value))
+        # More than one target indicates chained assignment, e.g. a = b = val
+        # The assignments should be done left-to-right (a = val, then b = val)
+        for target in node.targets:
+            self.visit_assignment(target, value)
+
+        return value
 
     def visit_assignment(
         self, target: ast.AST, value: SubtreeOut

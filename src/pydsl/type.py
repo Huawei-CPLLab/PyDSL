@@ -1336,9 +1336,7 @@ class Slice:
         self.hi = hi
         self.step = step
 
-    def get_args(
-        self, max_size: SupportsIndex
-    ) -> tuple[Index, Index, Index]:
+    def get_args(self, max_size: SupportsIndex) -> tuple[Index, Index, Index]:
         """
         Returns [offset, size, step], which can be used for MLIR functions.
         Returns 0, max_size, 1 instead of None values, respectively.
