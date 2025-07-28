@@ -1,0 +1,34 @@
+name: "Build pydsl-ci Docker Image"
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: File preparation
+        shell: bash
+        run: |
+          git submodule update --init --recursive
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .ci/Dockerfile
+          push: true
+          tags: ghcr.io/huawei-cpllab/pydsl-ci:latest
