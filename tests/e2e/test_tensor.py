@@ -20,6 +20,9 @@ TensorF64_2 = TensorFactory((DYNAMIC, DYNAMIC), F64)
 TensorF64_4 = TensorFactory((DYNAMIC, DYNAMIC, DYNAMIC, DYNAMIC), F64)
 TensorU64_2 = TensorFactory((DYNAMIC, DYNAMIC), UInt64)
 
+# Important: PyDSL functions are allowed to modify tensors passed as arguments
+# in-place. Thus, we should always make a copy to compare to or pass in a copy.
+
 
 def test_wrong_dim():
     @compile()
@@ -41,7 +44,7 @@ def test_load():
         return t1[1, 2] + t1[0, 0]
 
     n1 = np.asarray([[1, 2, 4], [8, 16, 32]], dtype=np.int32)
-    assert f(n1) == n1[1, 2] + n1[0, 0]
+    assert f(n1.copy()) == n1[1, 2] + n1[0, 0]
 
 
 def test_store():
@@ -66,7 +69,7 @@ def test_load_slice_1d():
         return t1[2:9:3]
 
     n1 = multi_arange((10,), np.float64)
-    assert (f(n1) == n1[2:9:3]).all()
+    assert (f(n1.copy()) == n1[2:9:3]).all()
 
 
 def test_load_slice_3d():
@@ -75,7 +78,7 @@ def test_load_slice_3d():
         return t1[1:7:3, 0:5:1, 1:6:2]
 
     n1 = multi_arange((10, 6, 8), np.int32)
-    assert (f(n1) == n1[1:7:3, 0:5:1, 1:6:2]).all()
+    assert (f(n1.copy()) == n1[1:7:3, 0:5:1, 1:6:2]).all()
 
 
 def test_load_slice_implicit():
@@ -84,7 +87,7 @@ def test_load_slice_implicit():
         return t1[::, 2::2, 3]
 
     n1 = multi_arange((5, 6, 7, 8), np.float64)
-    assert (f(n1).squeeze() == n1[::, 2::2, 3]).all()
+    assert (f(n1.copy()).squeeze() == n1[::, 2::2, 3]).all()
 
 
 def test_load_slice_extra_dims():
@@ -101,7 +104,7 @@ def test_load_slice_exp():
         return linalg.exp(t1[2:7:2, 3:])
 
     n1 = multi_arange((10, 10), np.float64)
-    assert np.allclose(f(n1), np.exp(n1[2:7:2, 3:]))
+    assert np.allclose(f(n1.copy()), np.exp(n1[2:7:2, 3:]))
 
 
 def test_load_compose_strided():
@@ -112,7 +115,7 @@ def test_load_compose_strided():
 
     n1 = multi_arange((16, 12), np.float32)
     n1_sub = n1[1:15:2, ::3][1::3, 1::2]
-    assert (f(n1) == n1_sub).all()
+    assert (f(n1.copy()) == n1_sub).all()
 
 
 def test_store_slice_1d_multi():
@@ -164,12 +167,12 @@ def test_store_slice_dynamic():
     n2 = multi_arange((5, 3, 4), np.float64) + 1000
     cor_res = n1.copy()
     cor_res[2:7, 1:4:1, :] = n2
-    assert (f(n1, n2, 1, 4, 1) == n1).all()
+    assert (f(n1, n2, 1, 4, 1) == cor_res).all()
 
 
-def test_store_slice_dif_dim():
+def test_store_slice_wrong_rank():
     with compilation_failed_from(TypeError):
-
+        # t1 has rank 3 but t2 has rank 2
         @compile()
         def f(
             t1: Tensor[UInt64, 10, 4, 7], t2: Tensor[UInt64, 6, 2]
@@ -187,7 +190,7 @@ def test_load_store_slice_self():
     n1 = multi_arange((10, 10), np.float32)
     cor_res = n1.copy()
     cor_res[2:9:3, 3:6] = cor_res[4:7, 1:7:2]
-    assert (f(n1) == n1).all()
+    assert (f(n1) == cor_res).all()
 
 
 def test_store_slice_exp():
@@ -298,7 +301,7 @@ if __name__ == "__main__":
     run(test_store_slice_1d_multi)
     run(test_store_slice_3d)
     run(test_store_slice_dynamic)
-    run(test_store_slice_dif_dim)
+    run(test_store_slice_wrong_rank)
     run(test_load_store_slice_self)
     run(test_store_slice_exp)
     run(test_strided_ndarray_to_tensor)
