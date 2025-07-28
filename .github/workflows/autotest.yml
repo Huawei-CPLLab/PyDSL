@@ -4,6 +4,8 @@ on:
   workflow_dispatch: # can trigger manually
   pull_request: # can trigger on pull requests
   push: # can trigger on pushes
+    branches:
+      - main
 
 jobs:
   autotest:
