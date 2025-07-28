@@ -9,7 +9,7 @@ jobs:
   autotest:
     runs-on: ubuntu-latest
     container:
-      image: pydsl/pydsl-ci:latest
+      image: ghcr.io/huawei-cpllab/pydsl-ci:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
