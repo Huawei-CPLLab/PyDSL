@@ -1,42 +1,26 @@
-import typing
+from collections.abc import Callable
 
 import mlir.dialects.linalg as linalg
 from mlir.dialects import linalg as mlir_linalg
-from mlir.dialects import tensor as mlir_tensor
 from mlir.dialects.linalg import DefinedOpCallable
 from mlir.dialects.linalg.opdsl.lang.comprehension import BinaryFn, TypeFn
 
 from pydsl.macro import CallMacro, Compiled
 from pydsl.memref import MemRef
 from pydsl.protocols import ToMLIRBase, lower_single
-from pydsl.tensor import DYNAMIC, Tensor, TensorFactory
+from pydsl.tensor import Tensor, TensorFactory
 
 # Compiled TypeAlias needs Lowerable
 from pydsl.type import Float, Int, Sign
 
 
-def build_empty_tensor(
-    sizes,
-    element_type,
-    *,
-    loc=None,
-    ip=None,
-):
-    dynamic_sizes = []
-    static_sizes = []
-    for s in sizes:
-        if isinstance(s, int):
-            static_sizes.append(s)
-        else:
-            static_sizes.append(DYNAMIC)
-            dynamic_sizes.append(s)
-
-    result_type = TensorFactory(tuple(static_sizes), element_type)
-    return mlir_tensor.empty(
-        lower_single(result_type), dynamic_sizes, loc=loc, ip=ip
-    )
-
-
+# TODO: it seems we currently only support Float element_type for unary ops.
+# TODO: currently, all unary ops only take one input operand, and generate the
+# output operand automatically, doing the operation in-place in case of a
+# MemRef. It might be useful to also allow the user to specify a different
+# output operand? They can currently achieve the same behaviour with a copy
+# and possibly a cast, but I don't know if it gets optimized the same way
+# (e.g. linalg.exp(tensor<?xf32>) -> tensor<?xf64>).
 def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
     """
     Uses a template macro to create any macro wrappers for elementwise unary fn
@@ -46,35 +30,27 @@ def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
     # The template macro
     @CallMacro.generate()
     def op_macro(visitor: ToMLIRBase, x: Compiled) -> Tensor | MemRef:
-        if not issubclass(x.element_type, Float):
+        if not isinstance(x, (Tensor, MemRef)):
             raise TypeError(
-                f"Elementwise linalg operation {op.op_name} expected Float "
-                f"element type, got {x.element_type.__name__}"
+                f"linalg elementwise unary operation expects an argument of "
+                f"type Tensor or MemRef, got {type(x).__qualname__}"
             )
 
-        match x:
-            case Tensor():
-                # Tensors are immutable, so a new Tensor is always made
-                ret_tensor = TensorFactory(x.shape, x.element_type)
-                ret = ret_tensor(
-                    build_empty_tensor(
-                        x.runtime_shape, lower_single(x.element_type)
-                    )
-                )
-                tensor = x
-                return type(tensor)(
-                    op(lower_single(tensor), outs=[lower_single(ret)])
-                )
-            case MemRef():
-                # MemRefs are mutable, so they are always written in-place
-                memref = x
-                op(lower_single(memref), outs=[lower_single(memref)])
-                return memref
-            case _:
-                raise Exception(
-                    f"Elementwise linalg operation {op.op_name} expected "
-                    f"MemRef or Tensor, got {type(x).__name__}"
-                )
+        if not issubclass(x.element_type, Float):
+            raise TypeError(
+                f"linalg elementwise unary operation {op.op_name} expects"
+                f"Float element type, got {x.element_type.__qualname__}"
+            )
+
+        if isinstance(x, Tensor):
+            # Return a new tensor, since tensors are SSA in MLIR
+            rep = op(lower_single(x), outs=[lower_single(x)])
+            return type(x)(rep)
+        else:
+            # Return x, since memrefs are modified in-place and op returns
+            # nothing useful
+            op(lower_single(x), outs=[lower_single(x)])
+            return x
 
     return op_macro
 
@@ -93,75 +69,26 @@ square = _gen_elementwise_unary_macro(mlir_linalg.square)
 tanh = _gen_elementwise_unary_macro(mlir_linalg.tanh)
 erf = _gen_elementwise_unary_macro(mlir_linalg.erf)
 
-# TODO: For some reason, reciprocal doesn't have an unary op. The Python
+# TODO: For some reason, reciprocal doesn't have a unary op. The Python
 # binding should be modified somewhat...
 
-BinaryTypeDecision = typing.Callable[
-    [Tensor | MemRef], tuple[BinaryFn, TypeFn]
+
+BinaryTypeDecision = Callable[
+    [[Tensor | MemRef], [Tensor | MemRef], [Tensor | MemRef]],
+    tuple[BinaryFn, TypeFn],
 ]
+"""
+A function that takes in the three arguments of an elementwise binary op
+(in1, in2, out), and returns the appropriate signed/unsigned function and cast
+to apply. Both input operands will be cast to the element_type of the output
+operand. Type checking to make sure all 3 element_types are appropriate should
+also be done here.
 
-
-# Elementwise binary macros are defined using linalg.elemwise_binary instead
-# of specific linalg operators. This is because some operations such as
-# max_unsigned and fexp are only supported by elemwise_binary.
-def _gen_elementwise_binary_macro(
-    type_decision: BinaryTypeDecision,
-) -> CallMacro:
-    @CallMacro.generate()
-    def op_macro(
-        visitor: "ToMLIRBase", x: Compiled, y: Compiled
-    ) -> Tensor | MemRef:
-        if x.shape != y.shape:
-            raise Exception(
-                "operands with differing shapes used in elementwise binary "
-                "linalg operation. Shape must be the same"
-            )
-
-        if x.element_type != y.element_type:
-            raise Exception(
-                "operands with differing element types used in elementwise "
-                "binary linalg operation. Element types must be the same"
-            )
-
-        # Get the respective fn and typefn from type_decision
-        fn, typefn = type_decision(x)
-
-        match x, y:
-            case Tensor(), Tensor():
-                ret_tensor = TensorFactory(x.shape, x.element_type)
-                ret = ret_tensor(
-                    build_empty_tensor(
-                        x.runtime_shape, lower_single(x.element_type)
-                    )
-                )
-                # Tensors are immutable, so a new Tensor is always made
-                return type(x)(
-                    linalg.elemwise_binary(
-                        lower_single(x),
-                        lower_single(y),
-                        outs=[lower_single(ret)],
-                        fun=fn,
-                        cast=typefn,
-                    )
-                )
-            case MemRef(), MemRef():
-                # MemRefs are mutable, so they are always written in-place
-                # TODO: writing is always done to the LHS for now
-                linalg.elemwise_binary(
-                    lower_single(x),
-                    lower_single(y),
-                    outs=[lower_single(x)],
-                    fun=fn,
-                    cast=typefn,
-                )
-                return x
-            case _:
-                raise Exception(
-                    f"elementwise linalg operation {fn.fn_name} expected "
-                    f"MemRef or Tensor, got {type(x).__name__}"
-                )
-
-    return op_macro
+The cast part specifies whether to use a signed or unsigned cast if element
+types differ. Examples from documentation of TypeFn:
+- cast_signed(I32 -> I64) -> `arith.ExtSIOp`
+- cast_unsigned(I32 -> I64) -> `arith.ExtUIOp`
+"""
 
 
 def _float_and_int(
@@ -174,8 +101,20 @@ def _float_and_int(
     Result of this function can be passed into _gen_elementwise_binary_macro.
     """
 
-    def payload(x):
-        t = x.element_type
+    def payload(
+        x: Tensor | MemRef, y: Tensor | MemRef, out: Tensor | MemRef
+    ) -> tuple[BinaryFn, TypeFn]:
+        for arg in (x, y, out):
+            t = arg.element_type
+            if not issubclass(t, (Float, Int)):
+                raise TypeError(
+                    f"this linalg elementwise binary operation only supports "
+                    f"arguments with element type Float or Int, got "
+                    f"{t.__qualname__}"
+                )
+
+        t = out.element_type
+
         if issubclass(t, Float):
             return fn_signed, TypeFn.cast_signed
         elif issubclass(t, Int) and t.sign == Sign.SIGNED:
@@ -183,35 +122,110 @@ def _float_and_int(
         elif issubclass(t, Int) and t.sign == Sign.UNSIGNED:
             return fn_unsigned, TypeFn.cast_unsigned
         else:
-            raise TypeError(
-                f"{x.element_type.__qualname__} is not supported in this "
-                f"elementwise binary linalg operations. Only Float and Int "
-                f"are supported"
-            )
+            assert (
+                False
+            ), "Already checked type of t, this should be uncreachable"
 
     return payload
 
 
 def _float_only(fn: DefinedOpCallable) -> BinaryTypeDecision:
     """
-    TypeDecision generator for elementwise binary operations that
-    only support Floats.
+    TypeDecision generator for elementwise binary operations that only support
+    Floats.
 
     Result of this function can be passed into _gen_elementwise_binary_macro.
     """
 
-    def payload(x):
-        t = x.element_type
+    def payload(
+        x: Tensor | MemRef, y: Tensor | MemRef, out: Tensor | MemRef
+    ) -> tuple[BinaryFn, TypeFn]:
+        for arg in (x, y, out):
+            t = arg.element_type
+            if not issubclass(t, (Float, Int)):
+                raise TypeError(
+                    f"this linalg elementwise binary operation only supports "
+                    f"arguments with element type Float or Int, got "
+                    f"{t.__qualname__}"
+                )
+
+        t = out.element_type
+
         if issubclass(t, Float):
             return fn, TypeFn.cast_signed
         else:
             raise TypeError(
-                f"{x.element_type.__qualname__} is not supported in this "
-                f"elementwise binary linalg operations. Only Float is "
-                f"supported"
+                f"this linalg elementwise binary operation only supports "
+                f"output element type Float, got {t.__qualname__}"
             )
 
     return payload
+
+
+# Elementwise binary macros are defined using linalg.elemwise_binary instead
+# of specific linalg operators. This is because some operations such as
+# max_unsigned and fexp are only supported by elemwise_binary.
+#
+# We currently allow different element types, I believe MLIR will cast
+# everything to the element type of the output operand.
+#
+# TODO: add a proper docstring readable by the user to write down this casting
+# behaviour (don't want to write same docstrict for all individual ops, like
+# add, max, etc., but only that is exposed to the user). Maybe possible once
+# we add generic elementwise binary?
+def _gen_elementwise_binary_macro(
+    type_decision: BinaryTypeDecision,
+) -> CallMacro:
+    @CallMacro.generate()
+    def op_macro(
+        visitor: ToMLIRBase, x: Compiled, y: Compiled, *, out: Compiled
+    ) -> Tensor | MemRef:
+        # This check must be done first, otherwise x.shape, y.element_type fail
+        for arg in (x, y, out):
+            if not isinstance(arg, (Tensor, MemRef)):
+                raise TypeError(
+                    f"linalg elementwise binary operation expects arguments "
+                    f"of type Tensor or MemRef, got {type(arg).__qualname__}"
+                )
+
+        is_x_tensor = isinstance(x, Tensor)
+        is_y_tensor = isinstance(y, Tensor)
+        is_out_tensor = isinstance(out, Tensor)
+
+        if is_x_tensor != is_y_tensor or is_x_tensor != is_out_tensor:
+            raise TypeError(
+                f"arguments to elementwise binary operation must be all "
+                f"Tensor or all MemRef, got {type(x).__qualname__}, "
+                f"{type(y).__qualname__}, {type(out).__qualname__}"
+            )
+
+        if x.shape != y.shape or x.shape != out.shape:
+            raise TypeError(
+                f"linalg elementwise binary operation expects arguments with "
+                f"the same shape, got arguments with shapes {x.shape}, "
+                f"{y.shape}, {out.shape}"
+            )
+
+        # Get the respective fn and typefn from type_decision
+        fn, typefn = type_decision(x, y, out)
+
+        rep = linalg.elemwise_binary(
+            lower_single(x),
+            lower_single(y),
+            outs=[lower_single(out)],
+            fun=fn,
+            cast=typefn,
+        )
+
+        if is_out_tensor:
+            # A new tensor needs to be returned, only the shape and element
+            # type of out is used
+            return type(out)(rep)
+        else:
+            # MemRefs are modified in-place
+            return out
+
+    return op_macro
 
 
 # Define elementwise binary operators
@@ -232,6 +246,10 @@ powf = _gen_elementwise_binary_macro(_float_only(BinaryFn.powf))
 
 @CallMacro.generate()
 def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
+    raise NotImplementedError(
+        "batch_matmul implementation is not quite complete"
+    )
+
     if not x.element_type == y.element_type:
         raise Exception(
             "operands with differing element types used in matmul"
@@ -248,6 +266,7 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
 
     t = x.element_type
 
+    # TODO: what is typeFn? it is never used
     if issubclass(t, Float):
         typeFn = TypeFn.cast_signed
     elif issubclass(t, Int) and t.sign == Sign.SIGNED:
@@ -271,6 +290,7 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
                 y.runtime_shape[2],
             ]
             ret = ret_tensor(
+                # TODO needs tensor.empty
                 build_empty_tensor(
                     ret_runtime_shape, lower_single(x.element_type)
                 )
@@ -286,3 +306,28 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
                 f"batch_matmul operation  expected "
                 f"Tensor, got {type(x).__name__}"
             )
+
+
+@CallMacro.generate()
+def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled):
+    """
+    Fill a MemRef/Tensor with the single value c.
+    If x is a MemRef, it is modified in-place.
+    If x is a Tensor, a new Tensor is returned.
+    """
+
+    if not isinstance(x, (Tensor, MemRef)):
+        raise TypeError(
+            f"linalg.fill expects Tensor or MemRef, got {type(x).__qualname__}"
+        )
+
+    # MLIR also supports casting, but we must cast in PyDSL anyway, to deal
+    # with the case when c is a Python constant expression
+    c = x.element_type(c)
+
+    if isinstance(x, Tensor):
+        rep = mlir_linalg.fill(lower_single(c), outs=[lower_single(x)])
+        return type(x)(rep)
+    else:
+        mlir_linalg.fill(lower_single(c), outs=[lower_single(x)])
+        return x

@@ -263,8 +263,8 @@ class UsesRMRD:
             expected_dt := ndtype[0]
         ):
             raise TypeError(
-                f"{cls.__qualname__} expects ndarray with dtype {expected_dt}, "
-                f"got {actual_dt}"
+                f"{cls.__qualname__} expects ndarray with dtype "
+                f"{expected_dt.__qualname__}, got {actual_dt.__qualname__}"
             )
 
         if not cls.same_shape(a):
