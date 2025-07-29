@@ -182,6 +182,23 @@ def test_static_method():
     assert g(0) == 0 + 0
 
 
+def test_default_args():
+    ast_123 = ast.parse("UInt32(123)", mode="eval")
+
+    @CallMacro.generate()
+    def add_macro(
+        visitor: ToMLIRBase, x: Uncompiled = ast_123, y: Evaluated = 456
+    ) -> UInt32:
+        x = visitor.visit(x)
+        return x.op_add(y)
+
+    @compile()
+    def f() -> UInt32:
+        return add_macro()
+
+    assert f() == 123 + 456
+
+
 if __name__ == "__main__":
     run(test_Compiled_ArgCompiler)
     run(test_Evaluated_ArgCompiler)
@@ -193,3 +210,4 @@ if __name__ == "__main__":
     run(test_class_method)
     run(test_class_only_method)
     run(test_static_method)
+    run(test_default_args)
