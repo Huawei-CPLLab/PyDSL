@@ -587,26 +587,24 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         raise TypeError("cannot store to a slice of a MemRef")
 
     @classmethod
+    def __class_getitem__(cls, args: tuple):
+        if not isinstance(args, tuple):
+            args = (args,)
+
+        return cls.class_factory(tuple(args[1:]), args[0])
+
+    @classmethod
     def on_class_getitem(
         cls, visitor: ToMLIRBase, slice: ast.AST
     ) -> SubtreeOut:
-        # TODO: this looks boilerplatey, maybe a helper function that takes
-        # in a typing.Generic and do automatic binding of arguments?
         match slice:
             case ast.Tuple(elts=elts):
-                args = [visitor.resolve_type_annotation(e) for e in elts]
+                args = tuple(visitor.resolve_type_annotation(e) for e in elts)
             case t:
-                args = [visitor.resolve_type_annotation(t)]
+                args = (visitor.resolve_type_annotation(t),)
 
-        if len(args) < 2:
-            raise TypeError(
-                f"MemRef expected at least 2 Generic arguments, got {args}"
-            )
-
-        dtype = args[0]
-        shape = args[1:]
-
-        return cls.class_factory(tuple(shape), dtype)
+        # Equivalent to cls.__class_getitem__(args)
+        return cls[args]
 
     def lower(self) -> tuple[Value]:
         return (self.value,)
