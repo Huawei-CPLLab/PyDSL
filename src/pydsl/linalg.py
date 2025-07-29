@@ -189,8 +189,8 @@ def _gen_elementwise_binary_macro(
                 )
 
         is_x_tensor = isinstance(x, Tensor)
-        is_y_tensor = isinstance(x, Tensor)
-        is_out_tensor = isinstance(x, Tensor)
+        is_y_tensor = isinstance(y, Tensor)
+        is_out_tensor = isinstance(out, Tensor)
 
         if is_x_tensor != is_y_tensor or is_x_tensor != is_out_tensor:
             raise TypeError(

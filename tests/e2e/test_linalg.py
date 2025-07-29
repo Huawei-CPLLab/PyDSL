@@ -268,7 +268,7 @@ def test_elemwise_bin_mixed_tensor_memref():
         # MLIR doesn't support mixing tensor and memref in this type of op
         @compile()
         def f(t1: Tensor[F64, 10], m2: MemRef[F64, 10]):
-            linalg.add(t1, t1, m2)
+            linalg.add(t1, t1, out=m2)
 
 
 def test_elemwise_bin_wrong_shape():
@@ -276,13 +276,13 @@ def test_elemwise_bin_wrong_shape():
 
         @compile()
         def f(t1: Tensor[F64, 5], t2: Tensor[F64, 8]):
-            linalg.sub(t1, t1, t2)
+            linalg.sub(t1, t1, out=t2)
 
     with compilation_failed_from(TypeError):
 
         @compile()
         def g(t1: Tensor[F64, 5], t2: Tensor[F64, 8]):
-            linalg.sub(t1, t2, t1)
+            linalg.sub(t1, t2, out=t1)
 
 
 def test_linalg_fill():
