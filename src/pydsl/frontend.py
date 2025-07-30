@@ -820,6 +820,7 @@ compilation may fail entirely.
         supported_dialects = {
             Dialect.from_name("affine"),
             Dialect.from_name("arith"),
+            Dialect.from_name("bufferization"),
             Dialect.from_name("builtin"),
             Dialect.from_name("cf"),
             Dialect.from_name("func"),
@@ -827,8 +828,8 @@ compilation may fail entirely.
             Dialect.from_name("linalg"),
             Dialect.from_name("llvm"),
             Dialect.from_name("math"),
-            Dialect.from_name("mesh"),
             Dialect.from_name("memref"),
+            Dialect.from_name("mesh"),
             Dialect.from_name("scf"),
             Dialect.from_name("tensor"),
             Dialect.from_name("transform"),
