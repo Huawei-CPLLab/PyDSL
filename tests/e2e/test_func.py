@@ -2,9 +2,12 @@ from typing import Any, TypeAlias, TypeVar
 
 import numpy as np
 from pydsl.frontend import compile
-from pydsl.type import F32, Index, SInt16, Tuple, UInt16
-from helper import compilation_failed_from, f32_isclose, run
+from pydsl.func import InlineFunction
+from pydsl.macro import CallMacro, Compiled
 from pydsl.memref import MemRef, MemRefFactory
+from pydsl.protocols import SubtreeOut, ToMLIRBase
+from pydsl.type import Bool, F32, Index, SInt16, Tuple, UInt16, UInt32, UInt64
+from helper import compilation_failed_from, f32_isclose, run
 
 
 def test_compile_identity():
@@ -99,7 +102,7 @@ def test_illegal_Tuple_mismatch_return():
 def test_illegal_high_level_mismatch_return():
     """
     This test is particularly important as both signed and unsigned integers
-    use the same MLIR signless integer type on the lower level
+    use the same MLIR signless integer type on the lower level.
     """
     with compilation_failed_from(TypeError):
 
@@ -113,19 +116,11 @@ def test_void_func_with_type_hint():
     def _(_: Index) -> None:
         return
 
-    @compile(globals())
-    def _(_: Index) -> None:
-        pass
-
 
 def test_void_func_without_type_hint():
     @compile(globals())
     def _(_: Index):
         return
-
-    @compile(globals())
-    def _(_: Index):
-        pass
 
 
 def test_illegal_composite_type_hint():
@@ -282,6 +277,198 @@ def test_recursion():
     assert (m == np.ones(5, dtype=np.uint16)).all()
 
 
+def test_inline_func_basic():
+    @InlineFunction.generate()
+    def my_add(a, b: Any) -> Any:
+        a = a + 1
+        b = b - 1
+        return a + b
+
+    @compile()
+    def f(a: SInt16, b: SInt16) -> Tuple[SInt16, SInt16, SInt16]:
+        c = my_add(a, b)
+        return a, b, c
+
+    assert f(12, 34) == (12, 34, 12 + 34)
+
+
+def test_inline_func_cast():
+    @InlineFunction.generate()
+    def my_add(a: UInt32, b: UInt16) -> UInt64:
+        return a + b
+
+    @compile()
+    def f() -> UInt64:
+        return my_add(60000, 9000) + (1 << 60)
+
+    assert f() == 60000 + 9000 + (1 << 60)
+
+
+def test_inline_func_call_macro():
+    @InlineFunction.generate()
+    def inline_add1(a, b) -> Any:
+        return a + b
+
+    @CallMacro.generate()
+    def macro_add(visitor: ToMLIRBase, a: Compiled, b: Compiled) -> SubtreeOut:
+        return inline_add1(visitor, a, b)
+
+    @InlineFunction.generate()
+    def inline_add2(a, b) -> Any:
+        return macro_add(a, b)
+
+    @compile()
+    def f(x: SInt16, y: SInt16) -> SInt16:
+        return macro_add(x, y)
+
+    @compile()
+    def g(a: UInt16, b: UInt16) -> UInt16:
+        return inline_add2(a, b)
+
+    assert f(12, -34) == 12 - 34
+    assert g(123, 456) == 123 + 456
+
+
+# This test can be modified in the future once we support multiple returns.
+# For now, this test tries to make sure we detect multiple returns correctly
+# and throw an error.
+def test_inline_func_multiple_returns():
+    # Bad
+    @InlineFunction.generate()
+    def inline_f1(a, b) -> Any:
+        return UInt16(5)
+        return a + b
+
+    # Bad
+    @InlineFunction.generate()
+    def inline_f2(a, b) -> Any:
+        if Bool(True):
+            return a
+        else:
+            return b
+
+    # Ok
+    @InlineFunction.generate()
+    def inline_f3(a, b) -> Any:
+        if Bool(True):
+            c = 0
+        else:
+            d = 1
+
+        return a + b
+
+    # Bad
+    @InlineFunction.generate()
+    def inline_f4(a, b):
+        if Bool(True):
+            return
+        else:
+            return
+
+    with compilation_failed_from(SyntaxError):
+
+        @compile()
+        def f1(x: UInt16, y: UInt16) -> UInt16:
+            return inline_f1(x, y)
+
+    with compilation_failed_from(SyntaxError):
+
+        @compile()
+        def f2(x: UInt16, y: UInt16) -> UInt16:
+            return inline_f2(x, y)
+
+    @compile()
+    def f3(x: UInt16, y: UInt16) -> UInt16:
+        return inline_f3(x, y)
+
+    assert f3(1, 2) == 1 + 2
+
+    with compilation_failed_from(SyntaxError):
+
+        @compile()
+        def f4(x: UInt16, y: UInt16):
+            inline_f4(x, y)
+
+
+def test_inline_func_tuple_return():
+    @InlineFunction.generate()
+    def inline_add_mul(a, b) -> Any:
+        return a + b, a * b
+
+    @compile()
+    def f(a: SInt16, b: SInt16) -> Tuple[SInt16, SInt16]:
+        x, y = inline_add_mul(a, b)
+        return x + 1, y - 1
+
+    assert f(-10, 3) == (-10 + 3 + 1, -10 * 3 - 1)
+
+
+def test_inline_func_kw_args():
+    @InlineFunction.generate()
+    def inline_f(a, b) -> Any:
+        return a * 2 + b
+
+    @compile()
+    def f(x: UInt32, y: UInt32) -> UInt32:
+        return inline_f(b=x, a=y)
+
+    assert f(12, 34) == 34 * 2 + 12
+
+
+def test_inline_func_bad_kw_arg():
+    @InlineFunction.generate()
+    def inline_f(a, b) -> Any:
+        return a + b
+
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f(x: UInt32, y: UInt32) -> UInt32:
+            return inline_f(x, a=y)
+
+
+def test_inline_func_pos_as_kw_only():
+    @InlineFunction.generate()
+    def inline_f(a, *, b) -> Any:
+        return a * 2 + b
+
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f(x: UInt32, y: UInt32) -> UInt32:
+            return inline_f(x, y)
+
+
+# In the future, we should make this NameError, but for now, this is correct
+def test_inline_func_scope():
+    @InlineFunction.generate()
+    def inline_f(a, b) -> Any:
+        d = a + b + c
+        return d * 3
+
+    @compile()
+    def f(a: UInt32, b: UInt32, c: UInt32) -> UInt32:
+        return inline_f(a, b)
+
+    assert f(12, 34, 56) == (12 + 34 + 56) * 3
+
+
+def test_inline_func_unbounded_local():
+    # Yes, adding c = 1 is supposed to make this fail because Python is a
+    # well-designed language
+    @InlineFunction.generate()
+    def inline_f(a, b) -> Any:
+        d = a + b + c
+        c = 1
+        return d * 3
+
+    with compilation_failed_from(UnboundLocalError):
+
+        @compile()
+        def f(a: UInt32, b: UInt32, c: UInt32) -> UInt32:
+            return inline_f(a, b)
+
+
 if __name__ == "__main__":
     run(test_compile_identity)
     run(test_compile_multiple)
@@ -308,3 +495,13 @@ if __name__ == "__main__":
     run(test_module_call_basic)
     run(test_body_func)
     run(test_recursion)
+    run(test_inline_func_basic)
+    run(test_inline_func_cast)
+    run(test_inline_func_call_macro)
+    run(test_inline_func_multiple_returns)
+    run(test_inline_func_tuple_return)
+    run(test_inline_func_kw_args)
+    run(test_inline_func_bad_kw_arg)
+    run(test_inline_func_pos_as_kw_only)
+    run(test_inline_func_scope)
+    run(test_inline_func_unbounded_local)
