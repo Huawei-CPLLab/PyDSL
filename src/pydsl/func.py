@@ -1,12 +1,14 @@
 import ast
 import enum
+import inspect
 import itertools
+import textwrap
 import typing
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import cache
-from inspect import Parameter, Signature
+from inspect import BoundArguments, Parameter, Signature
 
 import mlir.dialects.func as func
 import mlir.dialects.transform as transform
@@ -106,7 +108,7 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         ...
 
     @abstractmethod
-    def _get_new_var(self) -> dict[str, SubtreeOut]:
+    def _get_new_vars(self) -> dict[str, SubtreeOut]:
         """
         Return a dictionary of variables being defined when the program
         enters the body of the function
@@ -235,11 +237,13 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         Establish a new function scope in the scope stack while the context
         is open.
         """
-        func_args = self._get_new_var()
+        func_args = self._get_new_vars()
 
         used = UsedAnalysis.analyze(node)
         bound = BoundAnalysis.analyze(node)
 
+        # Replacing the next line with names_table = {} passes all tests right
+        # now. I suspect this is only useful for nested functions
         names_table = {name: stack.find_name(name) for name in (used - bound)}
         names_table.update(func_args)
 
@@ -533,7 +537,7 @@ class Function(FunctionLike):
             for n in node.body:
                 visitor.visit(n)
 
-    def _get_new_var(self) -> dict[str, SubtreeOut]:
+    def _get_new_vars(self) -> dict[str, SubtreeOut]:
         return {
             # TODO: change this to using typ.lift(arg) function once that's
             # in Lowerable protocol
@@ -633,7 +637,7 @@ class TransformSequence(FunctionLike):
 
             transform.YieldOp()
 
-    def _get_new_var(self) -> dict[str, SubtreeOut]:
+    def _get_new_vars(self) -> dict[str, SubtreeOut]:
         return {
             # TODO: change this to using typ.lift(arg) function once that's
             # in Lowerable protocol
@@ -678,3 +682,189 @@ class TransformSequence(FunctionLike):
     def lower_class(cls) -> tuple[mlir.Type]:
         # FIXME: not implemented
         raise NotImplementedError("FIXME")
+
+
+class InlineFunction:
+    """
+    A PyDSL inline function. This behaves similar to a normal PyDSL function,
+    but we guarantee that all of the MLIR it produces will be in-line, and will
+    not create an MLIR function object.
+
+    Currently, the inline function is able to access variables from the
+    caller's scope. This is probably not ideal and should be removed.
+
+    An InlineFunction is somewhat similar to a CallMacro with all Compiled
+    arguments. The biggest difference is that the body of an InlineFunction is
+    parsed as PyDSL, while the body of a CallMacro is parsed as Python. It
+    should be possible to call an InlineFunction from a CallMacro by passing in
+    the visitor and a SubtreeOut for each argument.
+    """
+
+    # TODO: maybe we can prevent the inline function from accessing variables
+    # from an outer function by creating a new visitor object? Might need to do
+    # some logic to make sure it receives the right variables from whatever
+    # context it's defined in. And if at some point we decide to support having
+    # an inline function defined inside a PyDSL function, that will just be
+    # painful.
+    # TODO: a good fraction of this code is very similar to CallMacro's code.
+    # Maybe there is some way to reduce code duplication.
+
+    found_ret: bool = False
+    retv: SubtreeOut | None = None
+    """
+    The return value of the function is stored here.
+
+    TODO: this won't quite work if in the future, we support an inline function
+    calling itself recursively (can become possible and not lead to infinite
+    recursion with
+    https://github.com/Huawei-CPLLab/PyDSL/issues/17#issuecomment-3139943581).
+    """
+
+    signature: Signature
+    src_ast: ast.FunctionDef
+
+    def __init__(self, signature: Signature, src_ast: ast.FunctionDef):
+        self.signature = signature
+        self.src_ast = src_ast
+
+    def on_Return(self, visitor: "ToMLIRBase", node: ast.Return) -> SubtreeOut:
+        if self.found_ret:
+            raise SyntaxError(
+                "detected multiple return statements in inline function"
+            )
+
+        self.found_ret = True
+        self.retv = (
+            visitor.visit(node.value) if node.value is not None else None
+        )
+
+    def parse_args(self, *args, **kwargs) -> BoundArguments:
+        """
+        Try to bind arguments, apply defaults, and type cast. Arguments should
+        already be compiled to PyDSL types by this point.
+        """
+        params = self.signature.parameters
+
+        try:
+            # Associate each argument value passed into the call with
+            # the parameter of the function
+            bound_args = self.signature.bind(*args, **kwargs)
+            binding = bound_args.arguments
+        except TypeError as e:
+            raise TypeError(
+                f"couldn't bind arguments when calling an inline function: {e}"
+            ) from e
+
+        # Apply defaults for unfilled arguments
+        bound_args.apply_defaults()
+
+        # Cast arguments with type annotations
+        for name in binding.keys():
+            ann = params[name].annotation
+
+            if ann is not Parameter.empty and ann is not typing.Any:
+                if not isinstance(binding[name], ann):
+                    # Mutates bound_args
+                    binding[name] = ann(binding[name])
+
+        return bound_args
+
+    @staticmethod
+    def on_Call(
+        attr_chain: list[typing.Any],
+        visitor: ToMLIRBase,
+        node: ast.Call,
+        prefix_args: tuple[ast.AST] = tuple(),
+    ) -> SubtreeOut:
+        """
+        Reformats arguments to (visitor, *args, **kwargs). Also parses the
+        arguments to a SubtreeOut, to be passed into __call__.
+        """
+        fn: InlineFunction = attr_chain[-1]
+        assert isinstance(
+            fn, InlineFunction
+        ), "InlineFunction on_Call called on not an InlineFunction"
+
+        args = tuple(visitor.visit(arg) for arg in (*prefix_args, *node.args))
+        kwargs = {kw.arg: visitor.visit(kw.value) for kw in node.keywords}
+
+        # Equivalent to InlineFunction.__call__(fn, visitor, *args, **kwargs)
+        return fn(visitor, *args, **kwargs)
+
+    # NOTE: the important distinction between on_Call and __call__ is that
+    # CallMacros and other compiler code access __call__ directly, while
+    # PyDSL code accesses on_Call. So anything that is necessary for both
+    # should be done in __call__, and any parsing necessary only when called
+    # from a PyDSL context should be in on_Call.
+
+    def __call__(self, visitor: ToMLIRBase, *args, **kwargs) -> SubtreeOut:
+        """
+        Takes in a visitor and a number of arguments, and returns the result
+        of applying this function on the arguments. args and kwargs should all
+        already be compiled and thus have type SubtreeOut. The new scope will
+        be created here.
+        """
+        bound_args = self.parse_args(*args, **kwargs)
+
+        self.found_ret = False
+        self.retv = None
+
+        stack = visitor.scope_stack
+        used = UsedAnalysis.analyze(self.src_ast)
+        bound = BoundAnalysis.analyze(self.src_ast)
+        names_table = {name: stack.find_name(name) for name in (used - bound)}
+        # Assign arguments to their respective parameter names
+        names_table.update(bound_args.arguments)
+
+        with stack.new_scope(Scope(self, names_table, bound)):
+            for node in self.src_ast.body:
+                visitor.visit(node)
+
+        retv = self.retv
+        rett = self.signature.return_annotation
+
+        if rett is Signature.empty or rett is None:
+            if retv is not None:
+                raise TypeError(
+                    f"expected return type of None for inline function, got "
+                    f"{type(retv).__qualname__}. Use typing.Any to indicate "
+                    f"that any return type is allowed"
+                )
+        elif rett is not typing.Any:
+            # Try casting
+            if not isinstance(retv, rett):
+                retv = rett(retv)
+
+        return retv
+
+    @classmethod
+    def generate(cls):
+        """
+        Returns a decorator which converts a function into an inline function.
+
+        An inline function can be defined as:
+        @InlineFunction.generate()
+        def f(): ...
+
+        We do not use something like @InlineFunction.generate or @inline
+        directly, since in the future, we might want to support passing in some
+        more arguments to determine how the inline function should be generated
+        (similar to how CallMacro.generate has a method_type argument). For
+        example, maybe we will want to support passing in a context object
+        that specifies the local variables.
+        """
+
+        def generate_sub(f: Callable) -> InlineFunction:
+            # ast.parse returns an ast.Module, extract only the function
+            src_ast = ast.parse(textwrap.dedent(inspect.getsource(f))).body[0]
+
+            if not isinstance(src_ast, ast.FunctionDef):
+                raise AssertionError(
+                    f"expected AST of inline function to be ast.FunctionDef, "
+                    f"got {type(src_ast).__qualname__}"
+                )
+
+            # Return a new instance of InlineFunction
+            return cls(inspect.signature(f), src_ast)
+
+        return generate_sub

@@ -336,7 +336,7 @@ class ToMLIR(ToMLIRBase):
                 # adds the AST as the first parameter, similar to
                 # how self works in Python
                 return handle_CompileTimeCallable(
-                    self, value, prefix_args=[operand]
+                    self, value, prefix_args=(operand,)
                 )
 
             case _:
@@ -785,7 +785,7 @@ class ToMLIR(ToMLIRBase):
         for item in node.items:
             if type(call := item.context_expr) is ast.Call:
                 return handle_CompileTimeCallable(
-                    self, call, prefix_args=[node.body]
+                    self, call, prefix_args=(node.body,)
                 )
             raise NotImplementedError(
                 "with statement currently only allows calls as contexts"

@@ -3,8 +3,8 @@ from collections.abc import Iterable
 from functools import cache
 
 """
-The Used and Bound analysis attempts to emulate Python's name resolution behavior as closely as
-possible.
+The Used and Bound analysis attempts to emulate Python's name resolution
+behavior as closely as possible.
 It is NOT a runtime frames stack, but rather a stack of nested function scope
 and the variables that they define.
 

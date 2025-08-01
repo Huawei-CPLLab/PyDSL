@@ -266,7 +266,9 @@ class CallMacro(Macro):
             bound_args = signature.bind(*args, **keywords)
             binding = bound_args.arguments
         except TypeError as e:
-            raise TypeError(f"error occured when calling a macro: {e}") from e
+            raise TypeError(
+                f"couldn't bind arguments when calling a macro: {e}"
+            ) from e
 
         for name in binding.keys():
             # compile each argument value according to its argtype hinting
