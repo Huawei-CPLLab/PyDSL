@@ -1,5 +1,6 @@
 import numpy as np
 
+import pydsl.arith as arith
 from pydsl.frontend import compile
 from pydsl.memref import DYNAMIC, MemRef, MemRefFactory
 from pydsl.tensor import Tensor, TensorFactory
@@ -305,6 +306,24 @@ def test_linalg_fill():
     assert (n2 == 456).all()
 
 
+def test_reduce():
+    combs_pydsl = [arith.max, arith.min]
+    combs_np = [np.maximum, np.minimum]
+    inits = [3.2, 4.6]
+
+    for comb_pydsl, comb_np, init in zip(combs_pydsl, combs_np, inits):
+
+        @compile()
+        def f(x: Tensor[F32, 8, 20], init: Tensor[F32, 8]) -> Tensor[F32, 8]:
+            return linalg.reduce(comb_pydsl, x, init=init, dims=[1])
+
+        in_arr = multi_arange((8, 20), np.float32) / 10 - 5
+        init_arr = np.full((8,), init, dtype=np.float32)
+        cor_res = comb_np.reduce(in_arr, initial=init, axis=1)
+        act_res = f(in_arr, init_arr)
+        assert np.allclose(act_res, cor_res)
+
+
 if __name__ == "__main__":
     run(test_linalg_exp)
     run(test_linalg_log)
@@ -328,3 +347,4 @@ if __name__ == "__main__":
     run(test_elemwise_bin_mixed_tensor_memref)
     run(test_elemwise_bin_wrong_shape)
     run(test_linalg_fill)
+    run(test_reduce)
