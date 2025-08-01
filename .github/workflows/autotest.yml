@@ -21,6 +21,18 @@ jobs:
       - name: Run hatch test
         shell: bash
         run: hatch test
+  formattest:
+    name: Code Formatting check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with: 
+          python-version:  '3.12.x'
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Dependencies
+        shell: bash
+        run: pip install hatch
       - name: Code Formatting check
         shell: bash
         run: hatch fmt -f --check
