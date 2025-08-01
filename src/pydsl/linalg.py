@@ -1,13 +1,13 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
-import mlir.dialects.linalg as linalg
-from mlir.dialects import linalg as mlir_linalg
+import mlir.dialects.linalg as mlir_linalg
 from mlir.dialects.linalg import DefinedOpCallable
 from mlir.dialects.linalg.opdsl.lang.comprehension import BinaryFn, TypeFn
+from mlir.ir import InsertionPoint
 
-from pydsl.macro import CallMacro, Compiled
+from pydsl.macro import CallMacro, Compiled, Evaluated
 from pydsl.memref import MemRef
-from pydsl.protocols import ToMLIRBase, lower_single
+from pydsl.protocols import ToMLIRBase, lower, lower_single
 from pydsl.tensor import Tensor, TensorFactory
 
 # Compiled TypeAlias needs Lowerable
@@ -204,7 +204,7 @@ def _gen_elementwise_binary_macro(
         # Get the respective fn and typefn from type_decision
         fn, typefn = type_decision(x, y, out)
 
-        rep = linalg.elemwise_binary(
+        rep = mlir_linalg.elemwise_binary(
             lower_single(x),
             lower_single(y),
             outs=[lower_single(out)],
@@ -304,7 +304,7 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
 
 
 @CallMacro.generate()
-def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled):
+def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled) -> Tensor | MemRef:
     """
     Fill a MemRef/Tensor with the single value c.
     If x is a MemRef, it is modified in-place.
@@ -321,3 +321,134 @@ def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled):
         return type(x)(rep)
     else:
         return x
+
+
+def verify_reduced_dims(
+    in_shape: tuple[int], expected_shape: tuple[int], dims: Iterable[int]
+):
+    """
+    Verifies that dimensions with indices in dims can be removed from in_shape
+    to result in expected_shape. Raises a ValueError if dims is invalid, and
+    a TypeError if the final dimensions don't match.
+    """
+    new_shape = []
+    prv_dim = -1
+    for dim in dims:
+        if dim < 0 or dim > len(in_shape):
+            raise ValueError(
+                f"dimension {dim} is out of bounds, input has rank "
+                f"{len(in_shape)}"
+            )
+        if dim <= prv_dim:
+            raise ValueError(f"dims should be in increasing order, got {dims}")
+        for i in range(prv_dim + 1, dim):
+            new_shape.append(in_shape[i])
+        prv_dim = dim
+
+    for i in range(prv_dim + 1, len(in_shape)):
+        new_shape.append(in_shape[i])
+
+    if tuple(new_shape) != tuple(expected_shape):
+        raise ValueError(
+            f"removing dimensions {dims} from the shape {in_shape} results in "
+            f"{tuple(new_shape)}, but expected it to be {expected_shape}"
+        )
+
+
+@CallMacro.generate()
+def reduce(
+    visitor: ToMLIRBase,
+    combiner: Compiled,
+    x: Compiled,
+    *,
+    init: Compiled,
+    dims: Evaluated,
+) -> Tensor | MemRef:
+    """
+    Reduces x along the given dimensions using the given combiner function.
+
+    combiner should be a function that takes two operands of type
+    x.element_type and init.element_type, and returns a single value of type
+    init.element_type. Currently, combiner can be an InlineFunction or a
+    CallMacro that takes 2 Compiled arguments.
+
+    The output will have the same shape and type as init.
+    For MemRefs, init will be modified in-place.
+    For Tensors, a new tensor will be returned.
+
+    For each output value, it is initialized to the corresponding value of
+    init, then the combiner function is applied repeatedly to the current value
+    of the output and an appropriate element of x. Specifically, combiner
+    should have signature (cur: init.element_type, new_v: x.element_type) ->
+    init.element_type.
+
+    dims should specify the dimensions that will be eliminated from x in
+    increasing order.
+    """
+    verify_memref_tensor_types(x, init)
+    verify_reduced_dims(x.shape, init.shape, dims)
+
+    result_types = []
+    if isinstance(init, Tensor):
+        result_types.append(lower_single(type(init)))
+
+    rep = mlir_linalg.ReduceOp(result_types, lower(x), lower(init), dims)
+    in_t = x.element_type
+    out_t = init.element_type
+
+    # This feels like it could be done by the MLIR Python binding.
+    # This adds a new MLIR "block" with argument types in_t, out_t.
+    rep.combiner.blocks.append(lower_single(in_t), lower_single(out_t))
+    body = rep.combiner.blocks[0]
+
+    with InsertionPoint(body):
+        arg0 = in_t(body.arguments[0])
+        arg1 = out_t(body.arguments[1])
+        # Swap order of arguments passed to PyDSL function
+        res = out_t(combiner(visitor, arg1, arg0))
+        mlir_linalg.YieldOp(lower(res))
+
+    if isinstance(init, Tensor):
+        return type(init)(rep)
+    else:
+        return init
+
+
+@CallMacro.generate()
+def broadcast(
+    visitor: ToMLIRBase, x: Compiled, *, out: Compiled, dims: Evaluated
+) -> Tensor | MemRef:
+    """
+    Broadcasts elements of x to out by adding dims.
+
+    For MemRefs, out is modified in-place.
+    For Tensors, a new Tensor is returned, and only the shape of out is used.
+
+    out should be a Tensor/MemRef such that after removing the dimensions at
+    indices specified by dims, its shape becomes identical to the shape of x.
+
+    dims should specify the dimension indices to add to x, in increasing order.
+
+    Currently, x and out must have the same element type.
+    """
+    verify_memref_tensor_types(x, out)
+    verify_reduced_dims(out.shape, x.shape, dims)
+
+    if x.element_type is not out.element_type:
+        raise TypeError(
+            f"element types of linalg.broadcast operands must be the same, "
+            f"got {x.element_type.__qualname__} and "
+            f"{out.element_type.__qualname__}"
+        )
+
+    rep = mlir_linalg.broadcast(
+        lower_single(x), outs=lower(out), dimensions=dims
+    )
+
+    if isinstance(out, Tensor):
+        # mlir_linalg.broadcast returns an OpResultList of length <= 1
+        # I think the next line should really be done by the Python binding
+        rep = mlir_linalg._get_op_result_or_value(rep)
+        return type(out)(rep)
+    else:
+        return out

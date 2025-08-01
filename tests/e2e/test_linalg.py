@@ -1,9 +1,13 @@
 import numpy as np
+import typing
 
+from collections.abc import Iterable
+import pydsl.arith as arith
 from pydsl.frontend import compile
-from pydsl.memref import DYNAMIC, MemRef, MemRefFactory
+from pydsl.func import InlineFunction
+from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
 from pydsl.tensor import Tensor, TensorFactory
-from pydsl.type import F32, F64, SInt32, SInt64, UInt32, UInt64
+from pydsl.type import F32, F64, SInt32, SInt64, UInt8, UInt32, UInt64
 import pydsl.linalg as linalg
 from helper import compilation_failed_from, multi_arange, run
 
@@ -305,6 +309,157 @@ def test_linalg_fill():
     assert (n2 == 456).all()
 
 
+def test_reduce():
+    combs_pydsl = [arith.max, arith.min]
+    combs_np = [np.maximum, np.minimum]
+    inits = [3.2, 4.6]
+
+    for comb_pydsl, comb_np, init in zip(combs_pydsl, combs_np, inits):
+
+        @compile()
+        def f_tensor(
+            x: Tensor[F32, 8, 20], init: Tensor[F32, 8]
+        ) -> Tensor[F32, 8]:
+            return linalg.reduce(comb_pydsl, x, init=init, dims=[1])
+
+        @compile()
+        def f_memref(
+            x: MemRef[F32, 8, 20], init: MemRef[F32, 8]
+        ) -> MemRef[F32, 8]:
+            return linalg.reduce(comb_pydsl, x, init=init, dims=[1])
+
+        in_arr = multi_arange((8, 20), np.float32) / 10 - 5
+        init_arr = np.full((8,), init, dtype=np.float32)
+        cor_res = comb_np.reduce(in_arr, initial=init, axis=1)
+
+        res_tensor = f_tensor(in_arr.copy(), init_arr.copy())
+        assert np.allclose(res_tensor, cor_res)
+
+        res_memref = f_memref(in_arr, init_arr)
+        assert np.allclose(res_memref, cor_res)
+        assert (res_memref == init_arr).all()
+
+
+def test_reduce_bad_axes():
+    def check(dims: list[int]):
+        with compilation_failed_from(ValueError):
+
+            @compile()
+            def f(arr: Tensor[F32, 10, 20, 30], init: Tensor[F32, 10, 20]):
+                linalg.reduce(arith.max, arr, init=init, dims=dims)
+
+    check([2, 1])
+    check([1, 3])
+    check([-1, 2])
+    check([4])
+    check([1, 1])
+
+
+def test_reduce_multi_type():
+    @InlineFunction.generate()
+    def sum(a: UInt64, b: UInt32) -> UInt64:
+        return a + b
+
+    @compile()
+    def f(
+        arr: MemRef[UInt32, DYNAMIC, DYNAMIC, DYNAMIC],
+        out: MemRef[UInt64, DYNAMIC],
+    ):
+        linalg.reduce(sum, arr, init=out, dims=[0, 2])
+
+    arr = multi_arange((6, 7, 8), np.uint32) + int(1e9)
+    out = np.zeros((7,), dtype=np.uint64)
+
+    cor_res = arr.astype(np.uint64)
+    cor_res = np.add.reduce(cor_res, axis=2)
+    cor_res = np.add.reduce(cor_res, axis=0)
+
+    f(arr, out)
+    assert (out == cor_res).all()
+
+
+def test_reduce_non_commutative():
+    @InlineFunction.generate()
+    def combine(a, b) -> typing.Any:
+        return a * 16 + b
+
+    @compile()
+    def f(arr: MemRef[UInt8, 4, 4]) -> UInt64:
+        out = alloca(MemRef[UInt64])
+        linalg.reduce(combine, arr, init=out, dims=[0, 1])
+        return out[()]
+
+    arr = multi_arange((4, 4), np.uint8)
+    assert f(arr) == 0x123456789ABCDEF
+
+
+def _broadcast_np(
+    a: np.ndarray, dim_inds: Iterable[int], dim_sizes: Iterable[int]
+) -> np.ndarray:
+    a = np.expand_dims(a, dim_inds)
+
+    tgt_shape = list(a.shape)
+    for ind, sz in zip(dim_inds, dim_sizes, strict=True):
+        tgt_shape[ind] = sz
+
+    return np.broadcast_to(a, tgt_shape)
+
+
+def test_broadcast():
+    # TODO: @compile functions can be moved out of the loop once we support
+    # templating
+
+    def test(
+        init_dims: tuple[int],
+        new_dim_inds: tuple[int],
+        new_dim_sizes: tuple[int],
+    ):
+        n1 = multi_arange(init_dims, np.int32)
+        cor_res = _broadcast_np(n1, new_dim_inds, new_dim_sizes)
+        tgt_empty = -multi_arange(cor_res.shape, np.int32)
+
+        MemRefT1 = MemRefFactory(init_dims, SInt32)
+        MemRefT2 = MemRefFactory(cor_res.shape, SInt32)
+        TensorT1 = TensorFactory(init_dims, SInt32)
+        TensorT2 = TensorFactory(cor_res.shape, SInt32)
+
+        @compile()
+        def f_tensor(x: TensorT1, out: TensorT2) -> TensorT2:
+            return linalg.broadcast(x, out=out, dims=new_dim_inds)
+
+        @compile()
+        def f_memref(x: MemRefT1, out: MemRefT2) -> MemRefT2:
+            return linalg.broadcast(x, out=out, dims=new_dim_inds)
+
+        # For Tensor, check return value only
+        assert (f_tensor(n1.copy(), tgt_empty.copy()) == cor_res).all()
+
+        # For MemRef, check that out is modfied as well
+        act_res = f_memref(n1, tgt_empty)
+        assert (act_res == cor_res).all()
+        assert (tgt_empty == cor_res).all()
+
+    test((10, 20), (1,), (30,))
+    test((10,), (0, 2), (20, 30))
+    test((10, 20), (0, 1, 3, 4, 6, 7), (3, 4, 5, 6, 7, 8))
+
+
+def test_broadcast_multi_type():
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f(arr: MemRef[SInt32, 10], out: MemRef[SInt64, 4, 10]):
+            linalg.broadcast(arr, out=out, dims=[0])
+
+
+def test_broadcast_bad_shapes():
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f(arr: MemRef[SInt32, 10], out: MemRef[SInt32, 4, 9]):
+            linalg.broadcast(arr, out=out, dims=[0])
+
+
 if __name__ == "__main__":
     run(test_linalg_exp)
     run(test_linalg_log)
@@ -328,3 +483,10 @@ if __name__ == "__main__":
     run(test_elemwise_bin_mixed_tensor_memref)
     run(test_elemwise_bin_wrong_shape)
     run(test_linalg_fill)
+    run(test_reduce)
+    run(test_reduce_bad_axes)
+    run(test_reduce_multi_type)
+    run(test_reduce_non_commutative)
+    run(test_broadcast)
+    run(test_broadcast_multi_type)
+    run(test_broadcast_bad_shapes)
