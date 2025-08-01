@@ -14,6 +14,27 @@ from pydsl.tensor import Tensor, TensorFactory
 from pydsl.type import Float, Int, Sign
 
 
+def verify_memref_tensor_types(*args):
+    """
+    Checks that the elements of args are either all MemRef or all Tensor.
+    Raises a TypeError otherwise.
+    """
+
+    arg_type_str = ", ".join(type(arg).__qualname__ for arg in args)
+    if not all(isinstance(arg, (MemRef, Tensor)) for arg in args):
+        raise TypeError(
+            f"linalg operation expects arguments of type MemRef or "
+            f"Tensor, got {arg_type_str}"
+        )
+
+    is_tensor_arr = tuple(isinstance(arg, Tensor) for arg in args)
+    if not all(is_tensor_arr[0] == is_t for is_t in is_tensor_arr):
+        raise TypeError(
+            f"linalg operation expected arguments to be all MemRef or all "
+            f"Tensor, got {arg_type_str}"
+        )
+
+
 # TODO: it seems we currently only support Float element_type for unary ops.
 # TODO: currently, all unary ops only take one input operand, and generate the
 # output operand automatically, doing the operation in-place in case of a
@@ -30,17 +51,7 @@ def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
     # The template macro
     @CallMacro.generate()
     def op_macro(visitor: ToMLIRBase, x: Compiled) -> Tensor | MemRef:
-        if not isinstance(x, (Tensor, MemRef)):
-            raise TypeError(
-                f"linalg elementwise unary operation expects an argument of "
-                f"type Tensor or MemRef, got {type(x).__qualname__}"
-            )
-
-        if not issubclass(x.element_type, Float):
-            raise TypeError(
-                f"linalg elementwise unary operation {op.op_name} expects"
-                f"Float element type, got {x.element_type.__qualname__}"
-            )
+        verify_memref_tensor_types(x)
 
         if isinstance(x, Tensor):
             # Return a new tensor, since tensors are SSA in MLIR
@@ -181,23 +192,7 @@ def _gen_elementwise_binary_macro(
         visitor: ToMLIRBase, x: Compiled, y: Compiled, *, out: Compiled
     ) -> Tensor | MemRef:
         # This check must be done first, otherwise x.shape, y.element_type fail
-        for arg in (x, y, out):
-            if not isinstance(arg, (Tensor, MemRef)):
-                raise TypeError(
-                    f"linalg elementwise binary operation expects arguments "
-                    f"of type Tensor or MemRef, got {type(arg).__qualname__}"
-                )
-
-        is_x_tensor = isinstance(x, Tensor)
-        is_y_tensor = isinstance(y, Tensor)
-        is_out_tensor = isinstance(out, Tensor)
-
-        if is_x_tensor != is_y_tensor or is_x_tensor != is_out_tensor:
-            raise TypeError(
-                f"arguments to elementwise binary operation must be all "
-                f"Tensor or all MemRef, got {type(x).__qualname__}, "
-                f"{type(y).__qualname__}, {type(out).__qualname__}"
-            )
+        verify_memref_tensor_types(x, y, out)
 
         if x.shape != y.shape or x.shape != out.shape:
             raise TypeError(
@@ -217,7 +212,7 @@ def _gen_elementwise_binary_macro(
             cast=typefn,
         )
 
-        if is_out_tensor:
+        if isinstance(out, Tensor):
             # A new tensor needs to be returned, only the shape and element
             # type of out is used
             return type(out)(rep)
@@ -315,19 +310,14 @@ def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled):
     If x is a MemRef, it is modified in-place.
     If x is a Tensor, a new Tensor is returned.
     """
-
-    if not isinstance(x, (Tensor, MemRef)):
-        raise TypeError(
-            f"linalg.fill expects Tensor or MemRef, got {type(x).__qualname__}"
-        )
+    verify_memref_tensor_types(x)
 
     # MLIR also supports casting, but we must cast in PyDSL anyway, to deal
     # with the case when c is a Python constant expression
     c = x.element_type(c)
+    rep = mlir_linalg.fill(lower_single(c), outs=[lower_single(x)])
 
     if isinstance(x, Tensor):
-        rep = mlir_linalg.fill(lower_single(c), outs=[lower_single(x)])
         return type(x)(rep)
     else:
-        mlir_linalg.fill(lower_single(c), outs=[lower_single(x)])
         return x
