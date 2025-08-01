@@ -19,9 +19,9 @@ jobs:
       - name: Editable install
         shell: bash
         run: pip install -e .
-      - name: Run hatch test
+      - name: Run pytest
         shell: bash
-        run: hatch test
+        run: pytest
   formattest:
     name: Code formatting check
     runs-on: ubuntu-latest
