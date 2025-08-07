@@ -235,7 +235,12 @@ def handle_CompileTimeCallable(
     # we avoid getting type(x) if it's Python's `type`, i.e. if x is a class
     while True:
         x = attr_chain[-1]
+        if (
+            type(x).__qualname__ == "JITFunction"
+        ):  # this is a Triton JIT function
+            from pydsl.triton import handle_TritonCallable
 
+            return handle_TritonCallable(visitor, node, x)
         match x:
             case _ if issubclass(type(x), type):
                 # if x is a class, fetch its on_Call
