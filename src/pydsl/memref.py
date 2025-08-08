@@ -619,7 +619,7 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 
     @classmethod
     def lower_class(cls) -> tuple[mlir.Type]:
-        if not all([cls.shape, cls.element_type]):
+        if cls.shape is None or cls.element_type is None:
             e = TypeError(
                 "attempted to lower MemRef without defined dims or type"
             )
