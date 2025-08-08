@@ -1,14 +1,14 @@
-import math
 import gc
-import weakref
+import math
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
+import weakref
 
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
-from pydsl.memref import DYNAMIC, Dynamic, MemRef, MemRefFactory, alloca, alloc
 import pydsl.linalg as linalg
-from pydsl.type import F32, F64, Bool, Index, Tuple, UInt32, SInt16
+from pydsl.memref import alloc, alloca, DYNAMIC, Dynamic, MemRef, MemRefFactory
+from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
 MemRefI16_2 = MemRef.get_fully_dynamic(SInt16, 2)
@@ -435,6 +435,20 @@ def test_chain_link_ndarray():
     assert n1_ref() is None
 
 
+def test_zero_d():
+    @compile()
+    def f(t1: MemRef[UInt32]) -> Tuple[UInt32, MemRef[UInt32]]:
+        x = t1[()]
+        t1[()] = 456
+        return x, t1
+
+    n1 = np.array(123, dtype=np.uint32)
+    res1, res2 = f(n1)
+    assert res1 == 123 and res2 == 456
+    assert isinstance(res2, np.ndarray)
+    assert res2.shape == ()
+
+
 if __name__ == "__main__":
     run(test_load_implicit_index_uint32)
     run(test_load_implicit_index_f64)
@@ -457,3 +471,4 @@ if __name__ == "__main__":
     run(test_load_slice_store)
     run(test_link_ndarray)
     run(test_chain_link_ndarray)
+    run(test_zero_d)
