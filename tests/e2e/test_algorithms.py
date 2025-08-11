@@ -341,7 +341,7 @@ def test_softmax():
     @compile()
     def softmax_memref(arr: MemRef[F64, N, M]) -> MemRef[F64, N, M]:
         reduce_res = alloca(MemRef[F64, N])
-        linalg.fill(neg_inf, reduce_res)
+        linalg.fill(reduce_res, neg_inf)
         linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
 
         mx = alloca(MemRef[F64, N, M])
@@ -350,7 +350,7 @@ def test_softmax():
 
         linalg.exp(arr)
 
-        linalg.fill(0, reduce_res)
+        linalg.fill(reduce_res, 0)
         linalg.reduce(_add, arr, init=reduce_res, dims=[1])
 
         sm = mx  # Reuse buffer
@@ -365,14 +365,14 @@ def test_softmax():
     def softmax_tensor(
         arr: Tensor[F64, N, M], reduce_res: Tensor[F64, N]
     ) -> Tensor[F64, N, M]:
-        reduce_res = linalg.fill(neg_inf, reduce_res)
+        reduce_res = linalg.fill(reduce_res, neg_inf)
         reduce_res = linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
         mx = linalg.broadcast(reduce_res, out=arr, dims=[1])
 
         arr = linalg.sub(arr, mx, out=arr)
         arr = linalg.exp(arr)
 
-        reduce_res = linalg.fill(0, reduce_res)
+        reduce_res = linalg.fill(reduce_res, 0)
         reduce_res = linalg.reduce(_add, arr, init=reduce_res, dims=[1])
         sm = linalg.broadcast(reduce_res, out=arr, dims=[1])
 
