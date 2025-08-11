@@ -304,7 +304,7 @@ def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
 
 
 @CallMacro.generate()
-def fill(visitor: "ToMLIRBase", c: Compiled, x: Compiled) -> Tensor | MemRef:
+def fill(visitor: "ToMLIRBase", x: Compiled, c: Compiled) -> Tensor | MemRef:
     """
     Fill a MemRef/Tensor with the single value c.
     If x is a MemRef, it is modified in-place.
