@@ -1,32 +1,37 @@
+import math
+import numpy as np
+from typing import Any
+
 from pydsl.affine import affine_map as am
 from pydsl.affine import affine_range as arange
 from pydsl.affine import dimension as D
 from pydsl.affine import symbol as S
-from pydsl.frontend import PolyCTarget, compile
-from pydsl.memref import DYNAMIC, MemRefFactory
+import pydsl.arith as arith
+from pydsl.frontend import compile
+from pydsl.func import InlineFunction
+import pydsl.linalg as linalg
+from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
+from pydsl.tensor import Tensor
 from pydsl.scf import range
 from pydsl.transform import (
-    distribute,
     fuse,
     fuse_into,
-    get_loop,
     int_attr,
-    parallel,
     recursively,
-    reorder,
     tag,
     tile,
 )
 from pydsl.transform import match_tag as match
 from pydsl.type import F32, F64, AnyOp, Index, Tuple
-from helper import run
+from helper import multi_arange, run
 
-MemRefRank3F32 = MemRefFactory((DYNAMIC, DYNAMIC, DYNAMIC), F32)
 MemRefRank2F32 = MemRefFactory((DYNAMIC, DYNAMIC), F32)
+MemRefRank3F32 = MemRefFactory((DYNAMIC, DYNAMIC, DYNAMIC), F32)
 MemRefRank2F64 = MemRefFactory((DYNAMIC, DYNAMIC), F64)
 
-# TODO: Due to the difficulty of testing algorithms, we will just see if they
-# compile without any error. This is enough to catch a lot of regression bugs.
+# TODO: Due to the difficulty of testing algorithms, for some of them, we will
+# just see if they compile without any error. This is enough to catch a lot of
+# regression bugs.
 
 # TODO: Commented out tests require fuse or fuse_into, which seem to be not
 # implemented right now. Re-add once those are implemented.
@@ -310,6 +315,81 @@ def lu(v0: Index, arg1: MemRefRank2F64):
 #     )(lu)
 
 
+def softmax_python(arr: np.ndarray):
+    mx = np.maximum.reduce(arr, axis=1)
+    mx = np.expand_dims(mx, 1)
+    arr = arr - mx
+
+    arr = np.exp(arr)
+
+    sm = np.add.reduce(arr, axis=1)
+    sm = np.expand_dims(sm, 1)
+    arr = arr / sm
+
+    return arr
+
+
+def test_softmax():
+    N = 64
+    M = 2048
+    neg_inf = -math.inf
+
+    @InlineFunction.generate()
+    def _add(a, b) -> Any:
+        return a + b
+
+    @compile()
+    def softmax_memref(arr: MemRef[F64, N, M]) -> MemRef[F64, N, M]:
+        reduce_res = alloca(MemRef[F64, N])
+        linalg.fill(neg_inf, reduce_res)
+        linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
+
+        mx = alloca(MemRef[F64, N, M])
+        linalg.broadcast(reduce_res, out=mx, dims=[1])
+        linalg.sub(arr, mx, out=arr)
+
+        linalg.exp(arr)
+
+        linalg.fill(0, reduce_res)
+        linalg.reduce(_add, arr, init=reduce_res, dims=[1])
+
+        sm = mx  # Reuse buffer
+        linalg.broadcast(reduce_res, out=sm, dims=[1])
+        linalg.div(arr, sm, out=arr)
+
+        return arr
+
+    # TODO: reduce_res should be allocated with tensor.empty, but tensor.empty
+    # is not really functional right now
+    @compile()
+    def softmax_tensor(
+        arr: Tensor[F64, N, M], reduce_res: Tensor[F64, N]
+    ) -> Tensor[F64, N, M]:
+        reduce_res = linalg.fill(neg_inf, reduce_res)
+        reduce_res = linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
+        mx = linalg.broadcast(reduce_res, out=arr, dims=[1])
+
+        arr = linalg.sub(arr, mx, out=arr)
+        arr = linalg.exp(arr)
+
+        reduce_res = linalg.fill(0, reduce_res)
+        reduce_res = linalg.reduce(_add, arr, init=reduce_res, dims=[1])
+        sm = linalg.broadcast(reduce_res, out=arr, dims=[1])
+
+        arr = linalg.div(arr, sm, out=arr)
+        return arr
+
+    # Without sqrt, all rows would give the same result after softmax
+    arr = np.sqrt(multi_arange((N, M), np.float64))
+    cor_res = softmax_python(arr)
+
+    memref_res = softmax_memref(arr.copy())
+    assert np.allclose(memref_res, cor_res)
+
+    tensor_res = softmax_tensor(arr.copy(), np.empty(N, dtype=np.float64))
+    assert np.allclose(tensor_res, cor_res)
+
+
 if __name__ == "__main__":
     # run(test_compile_explicit_affine_heat)
     # run(test_compile_implicit_affine_heat)
@@ -317,3 +397,4 @@ if __name__ == "__main__":
     run(test_compile_affine_jacobi)
     run(test_compile_correlation)
     # run(test_compile_lu)
+    run(test_softmax)

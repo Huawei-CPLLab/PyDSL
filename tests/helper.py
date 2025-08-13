@@ -34,11 +34,15 @@ def compilation_failed_from(error_type: type[Exception]):
             e, CompilationError
         ), f"expected CompilationError, but instead got {type(e)}"
 
-        assert isinstance(
-            e.exception, error_type
-        ), f"CompilationError is caused by {e.exception}, but should be {error_type}"
+        assert isinstance(e.exception, error_type), (
+            f"CompilationError is caused by {type(e.exception)}: "
+            f"{e.exception}, but should be {error_type}"
+        )
     else:
-        assert False, f"expected CompilationError caused by {error_type}, but no error was raised"
+        assert False, (
+            f"expected CompilationError caused by {error_type}, "
+            f"but no error was raised"
+        )
 
 
 def multi_arange(shape: tuple[int], dtype: type) -> np.ndarray:

@@ -1,14 +1,13 @@
 import gc
-import weakref
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
+import weakref
 
-import pydsl.linalg as linalg
 from pydsl.frontend import compile
+import pydsl.linalg as linalg
 from pydsl.memref import DYNAMIC
-
-from pydsl.type import F64, F32, SInt32, UInt64, Index
 from pydsl.tensor import Tensor, TensorFactory
+from pydsl.type import F32, F64, Index, SInt32, Tuple, UInt64
 from helper import failed_from, compilation_failed_from, multi_arange, run
 
 TensorF32_2 = Tensor[F32, DYNAMIC, DYNAMIC]
@@ -288,6 +287,20 @@ def test_link_ndarray():
     assert n1_root_ref() is None
 
 
+def test_zero_d():
+    @compile()
+    def f(t1: Tensor[SInt32]) -> Tuple[SInt32, Tensor[SInt32]]:
+        x = t1[()]
+        t1[()] = 456
+        return x, t1
+
+    n1 = np.array(123, dtype=np.int32)
+    res1, res2 = f(n1)
+    assert res1 == 123 and res2 == 456
+    assert isinstance(res2, np.ndarray)
+    assert res2.shape == ()
+
+
 if __name__ == "__main__":
     run(test_wrong_dim)
     run(test_load)
@@ -307,3 +320,4 @@ if __name__ == "__main__":
     run(test_strided_ndarray_to_tensor)
     run(test_arg_copy)
     run(test_link_ndarray)
+    run(test_zero_d)

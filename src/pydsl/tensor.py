@@ -1,21 +1,19 @@
-import collections.abc as cabc
 import ast
-import typing
+import collections.abc as cabc
 from functools import cache
-from pydsl.macro import CallMacro, Compiled, Evaluated
+import typing
 
-import mlir.dialects.tensor as mlir_tensor
+from mlir.dialects import tensor
 import mlir.ir as mlir
 from mlir.ir import DenseI64ArrayAttr, OpView, RankedTensorType, Value
-import mlir.dialects._tensor_ops_gen as tensor_ops_gen
 
+from pydsl.macro import CallMacro, Compiled, Evaluated
 from pydsl.memref import (
     UsesRMRD,
     RuntimeMemrefShape,
     slices_to_mlir_format,
     subtree_to_slices,
 )
-
 from pydsl.type import (
     Index,
     Lowerable,
@@ -127,7 +125,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
 
     @classmethod
     def lower_class(cls) -> tuple[mlir.Type]:
-        if not all([cls.shape, cls.element_type]):
+        if cls.shape is None or cls.element_type is None:
             e = TypeError(
                 "attempted to lower Tensor without defined dims or type"
             )
@@ -157,9 +155,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             (
                 d
                 if d != DYNAMIC
-                else mlir_tensor.DimOp(
-                    lower_single(self), lower_single(Index(i))
-                )
+                else tensor.DimOp(lower_single(self), lower_single(Index(i)))
             )
             for i, d in enumerate(self.shape)
         ]
@@ -175,7 +171,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             isinstance(key, SupportsIndex) for key in key_list
         ):
             key_list = lower_flatten([Index(key) for key in key_list])
-            rep = tensor_ops_gen.extract(lower_single(self), key_list)
+            rep = tensor.extract(lower_single(self), key_list)
             return self.element_type(rep)
 
         # Otherwise, do an extract_slice op
@@ -187,7 +183,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
         result_type = TensorFactory(tuple([DYNAMIC] * dim), self.element_type)
         dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
 
-        rep = tensor_ops_gen.extract_slice(
+        rep = tensor.extract_slice(
             result_type.lower_class()[0],
             lower_single(self),
             lo_list,
@@ -215,9 +211,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
         ):
             value_mlir = lower_single(self.element_type(value_st))
             key_list = lower_flatten([Index(key) for key in key_list])
-            rep = tensor_ops_gen.insert(
-                value_mlir, lower_single(self), key_list
-            )
+            rep = tensor.insert(value_mlir, lower_single(self), key_list)
             self.value = rep
             return rep
 
@@ -245,7 +239,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             if value_st.shape[i] == DYNAMIC
         ]
 
-        rep = tensor_ops_gen.insert_slice(
+        rep = tensor.insert_slice(
             lower_single(value_st),
             lower_single(self),
             lo_list,
@@ -324,4 +318,4 @@ def empty(
             idx += 1
         else:
             shape[i] = orig_shape[i]
-    return t_type(mlir_tensor.empty(shape, lower_single(t_type.element_type)))
+    return t_type(tensor.empty(shape, lower_single(t_type.element_type)))

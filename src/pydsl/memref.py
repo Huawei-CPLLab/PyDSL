@@ -1,11 +1,11 @@
 import ast
-import collections.abc as cabc
 import ctypes
 import typing
+from collections.abc import Callable, Iterable
 from ctypes import POINTER, c_void_p
 from dataclasses import dataclass
 from functools import cache
-from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final
 
 import mlir.ir as mlir
 import numpy as np
@@ -138,6 +138,16 @@ class RankedMemRefDescriptor:
         )
 
 
+def are_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> bool:
+    """
+    Returns whether arr1 and arr2 have the same elements, excluding positions
+    where at least one of the values is DYNAMIC.
+    """
+    return len(arr1) == len(arr2) and all(
+        a == b or a == DYNAMIC or b == DYNAMIC for a, b in zip(arr1, arr2)
+    )
+
+
 class UsesRMRD:
     """
     A mixin class for adding CType support for classes that eventually lower
@@ -227,10 +237,7 @@ class UsesRMRD:
         """
         Returns true if x's shape is the same as the MemRef's.
         """
-        return len(cls.shape) == len(x.shape) and all([
-            x_sz == cls_sz or cls_sz == DYNAMIC  # "?" accepts any shape
-            for x_sz, cls_sz in zip(x.shape, cls.shape)
-        ])
+        return are_shapes_compatible(cls.shape, x.shape)
 
     @classmethod
     def same_strides(cls, x: np.ndarray) -> bool:
@@ -238,15 +245,16 @@ class UsesRMRD:
         Returns true if x's strides are the same as the MemRef's.
         """
         if cls.strides is None:
-            # If default layout, make sure ndarray is also row-major order
+            # If default layout, check if ndarray is also row-major order
             return x.flags["C_CONTIGUOUS"]
         else:
-            # If we actually have a strided layout, check if it's
-            # compatible with the ndarray's strides
-            return len(cls.strides) == len(x.strides) and all([
-                x_s == cls_s * x.itemsize or cls_s == DYNAMIC
-                for x_s, cls_s in zip(x.strides, cls.strides)
-            ])
+            # numpy arrays store strides by number of bytes, but PyDSL and MLIR
+            # use number of elements
+            cls_byte_strides = [
+                s * x.itemsize if s != DYNAMIC else DYNAMIC
+                for s in cls.strides
+            ]
+            return are_shapes_compatible(cls_byte_strides, x.strides)
 
     @classmethod
     def _ndarray_to_CType(
@@ -275,10 +283,10 @@ class UsesRMRD:
 
         if not cls.same_strides(a):
             raise TypeError(
-                f"attempted to pass array with strides {a.strides} into a MemRef "
-                f"with strides {cls.strides}. The array has itemsize {a.itemsize}. "
-                f"The strides of the array should be {a.itemsize} times the strides "
-                f"of the MemRef."
+                f"attempted to pass array with strides {a.strides} into a "
+                f"MemRef with strides {cls.strides}. The array has itemsize "
+                f"{a.itemsize}. The strides of the array should be "
+                f"{a.itemsize} times the strides of the MemRef."
             )
 
         act_offset = cls.offset if cls.offset != DYNAMIC else 0
@@ -407,7 +415,7 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         # store composite types, got {element_type} which lowers to
         # {lower(element_type)}")
 
-        if not isinstance(shape, cabc.Iterable):
+        if not isinstance(shape, Iterable):
             raise TypeError(
                 f"MemRef requires shape to be iterable, got {type(shape)}"
             )
@@ -611,7 +619,7 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 
     @classmethod
     def lower_class(cls) -> tuple[mlir.Type]:
-        if not all([cls.shape, cls.element_type]):
+        if cls.shape is None or cls.element_type is None:
             e = TypeError(
                 "attempted to lower MemRef without defined dims or type"
             )
@@ -674,7 +682,7 @@ def verify_dynamic_sizes(mtype: type[MemRef], dynamic_sizes: Tuple) -> None:
     dynamic_sizes = lower(dynamic_sizes)
 
     # TODO: does this check do anything, since lower returns a tuple?
-    if not isinstance(dynamic_sizes, cabc.Iterable):
+    if not isinstance(dynamic_sizes, Iterable):
         raise TypeError(f"{repr(dynamic_sizes)} is not iterable")
 
     if (actual_dyn := len(dynamic_sizes)) != (
@@ -692,7 +700,7 @@ def verify_dynamic_symbols(
     dynamic_symbols = lower(dynamic_symbols)
 
     # TODO: does this check do anything, since lower returns a tuple?
-    if not isinstance(dynamic_symbols, cabc.Iterable):
+    if not isinstance(dynamic_symbols, Iterable):
         raise TypeError(f"{repr(dynamic_symbols)} is not iterable")
 
     if (actual_dyn := len(dynamic_symbols)) != (
@@ -711,7 +719,7 @@ def _alloc_generic(
     mtype: Compiled,
     dynamic_sizes: Compiled,
     dynamic_symbols: Compiled,
-    alloc_func: cabc.Callable[..., SubtreeOut],
+    alloc_func: Callable[..., SubtreeOut],
 ) -> SubtreeOut:
     """
     Does the logic required for alloc/alloca. It was silly having
