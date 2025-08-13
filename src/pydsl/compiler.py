@@ -1,14 +1,13 @@
 import ast
 import dataclasses
-from pathlib import Path
 import typing
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from dataclasses import dataclass
 from functools import cache, reduce
-from typing import Any, Iterator
+from pathlib import Path
+from typing import Any
 
-from mlir.dialects import arith, scf, func
+from mlir.dialects import arith, func, scf
 import mlir.ir as mlirir
 from mlir.ir import (
     Context,
@@ -17,9 +16,7 @@ from mlir.ir import (
     UnitAttr,
 )
 
-from pydsl.analysis.names import BoundAnalysis, UsedAnalysis
 from pydsl.func import Function, TransformSequence
-from pydsl.type import Index
 
 # BEWARE OF WHAT YOU IMPORT HERE. IMPORTING ANYTHING SUCH AS type OR macro
 # WILL CAUSE CYCLIC ERROR, AS ALMOST EVERY MODULE IN pydsl RELIES ON compiler
@@ -44,10 +41,10 @@ from pydsl.protocols import (
     handle_CompileTimeCallable,
     lower_single,
 )
-from pydsl.scope import Scope, ScopeStack
-from pydsl.type import Number, iscompiled
-from pydsl.type import Tuple as DTuple
+from pydsl.scope import ScopeStack
+from pydsl.type import Index, Number, iscompiled
 from pydsl.type import Slice as DSlice
+from pydsl.type import Tuple as DTuple
 
 
 # FIXME: turn these into proper passes that return a dict
@@ -790,13 +787,20 @@ class ToMLIR(ToMLIRBase):
                 "with statement currently only allows calls as contexts"
             )
 
+    def customize_context(self, ctx: Context):
+        """
+        This method is guaranteed to be called right after the MLIR Context is
+        created. Subclasses can override this method to register their own
+        dialects.
+        """
+
     @contextmanager
     def compile(
         self,
         node,
         transform_seq: ast.AST | None = None,
         interceptor: Callable[[SubtreeOut], SubtreeOut] | None = None,
-    ) -> Iterator["Module"]:
+    ) -> Iterable["Module"]:
         # create additional properties in AST nodes that we will need during
         # compilation
         generate_parent(
@@ -810,7 +814,9 @@ class ToMLIR(ToMLIRBase):
 
         # pre-initiate symbol objects
 
-        with Context() as _, Location.unknown():
+        with Context() as ctx, Location.unknown():
+            self.customize_context(ctx)
+
             if interceptor is not None:
                 module: Module = self.visit_with_interception(
                     node, interceptor
@@ -1009,7 +1015,7 @@ class Module:
     def verify(self) -> typing.Never | typing.Literal[True]:
         return self.module.operation.verify()
 
-    def build_body(self, visitor: ToMLIR, node: ast.Module) -> Iterator[None]:
+    def build_body(self, visitor: ToMLIR, node: ast.Module) -> Iterable[None]:
         self.module = mlirir.Module.create()
         visitor.module = self.module
 
@@ -1036,6 +1042,6 @@ class Module:
                         visitor.visit(n)
 
     @contextmanager
-    def insert(self) -> Iterator[None]:
+    def insert(self) -> Iterable[None]:
         with InsertionPoint(self.module.body):
             yield
