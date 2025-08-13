@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import cache
 from inspect import BoundArguments, Parameter, Signature
+from typing import Any
 
 import mlir.dialects.func as func
 import mlir.dialects.transform as transform
@@ -207,7 +208,7 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         argument types and return type
         """
 
-        def check(typ: typing.Any) -> None:
+        def check(typ: Any) -> None:
             if not isinstance(typ, Lowerable):
                 raise TypeError(
                     f"arguments and return type of {cls.__name__} must be "
@@ -588,7 +589,7 @@ class Function(FunctionLike):
         return mlir.FunctionType.get(*cls._lower_typing())
 
     def on_Call(
-        attr_chain: list[typing.Any],
+        attr_chain: list[Any],
         visitor: "ToMLIRBase",
         node: ast.Call,
         prefix_args: tuple[ast.AST] = tuple(),
@@ -695,8 +696,14 @@ class InlineFunction:
     but we guarantee that all of the MLIR it produces will be in-line, and will
     not create an MLIR function object.
 
-    Currently, the inline function is able to access variables from the
-    caller's scope. This is probably not ideal and should be removed.
+    Currently, type annotations on function parameters is optional. If a type
+    annotation is specified, the corresponding argument will be cast to that
+    type when the function is called. Otherwise, it will retain its original
+    type. Similarly, the return value will be cast to the specified return
+    type. For consistency with normal PyDSL functions, no return type
+    annotation is equivalent to a return type of None (void, no return value).
+    You can specify a return type of typing.Any, in which case no casting will
+    be done on the return type.
 
     An InlineFunction is somewhat similar to a CallMacro with all Compiled
     arguments. The biggest difference is that the body of an InlineFunction is
@@ -705,12 +712,6 @@ class InlineFunction:
     the visitor and a SubtreeOut for each argument.
     """
 
-    # TODO: maybe we can prevent the inline function from accessing variables
-    # from an outer function by creating a new visitor object? Might need to do
-    # some logic to make sure it receives the right variables from whatever
-    # context it's defined in. And if at some point we decide to support having
-    # an inline function defined inside a PyDSL function, that will just be
-    # painful.
     # TODO: a good fraction of this code is very similar to CallMacro's code.
     # Maybe there is some way to reduce code duplication.
 
@@ -727,10 +728,21 @@ class InlineFunction:
 
     signature: Signature
     src_ast: ast.FunctionDef
+    vars: dict[str, Any]
+    """
+    Mapping of names to values of defined variables in the scope of the inline
+    function. Same format as result of locals() or globals().
+    """
 
-    def __init__(self, signature: Signature, src_ast: ast.FunctionDef):
+    def __init__(
+        self,
+        signature: Signature,
+        src_ast: ast.FunctionDef,
+        vars: dict[str, Any],
+    ):
         self.signature = signature
         self.src_ast = src_ast
+        self.vars = vars
 
     def on_Return(self, visitor: "ToMLIRBase", node: ast.Return) -> SubtreeOut:
         if self.found_ret:
@@ -767,7 +779,7 @@ class InlineFunction:
         for name in binding.keys():
             ann = params[name].annotation
 
-            if ann is not Parameter.empty and ann is not typing.Any:
+            if ann is not Parameter.empty and ann is not Any:
                 if not isinstance(binding[name], ann):
                     # Mutates bound_args
                     binding[name] = ann(binding[name])
@@ -776,7 +788,7 @@ class InlineFunction:
 
     @staticmethod
     def on_Call(
-        attr_chain: list[typing.Any],
+        attr_chain: list[Any],
         visitor: ToMLIRBase,
         node: ast.Call,
         prefix_args: tuple[ast.AST] = tuple(),
@@ -814,16 +826,25 @@ class InlineFunction:
         self.found_ret = False
         self.retv = None
 
-        stack = visitor.scope_stack
+        # Make a copy of the stack stored by visitor
+        old_stack = visitor.scope_stack
+        # Reassign the visitor's stack to the locals of this function
+        new_stack = ScopeStack(self.vars)
+        visitor.scope_stack = new_stack
+
         used = UsedAnalysis.analyze(self.src_ast)
         bound = BoundAnalysis.analyze(self.src_ast)
-        names_table = {name: stack.find_name(name) for name in (used - bound)}
+        names_table = {
+            name: new_stack.find_name(name) for name in (used - bound)
+        }
         # Assign arguments to their respective parameter names
         names_table.update(bound_args.arguments)
 
-        with stack.new_scope(Scope(self, names_table, bound)):
+        with new_stack.new_scope(Scope(self, names_table, bound)):
             for node in self.src_ast.body:
                 visitor.visit(node)
+
+        visitor.scope_stack = old_stack
 
         retv = self.retv
         rett = self.signature.return_annotation
@@ -835,7 +856,7 @@ class InlineFunction:
                     f"{type(retv).__qualname__}. Use typing.Any to indicate "
                     f"that any return type is allowed"
                 )
-        elif rett is not typing.Any:
+        elif rett is not Any:
             # Try casting
             if not isinstance(retv, rett):
                 retv = rett(retv)
@@ -843,21 +864,20 @@ class InlineFunction:
         return retv
 
     @classmethod
-    def generate(cls):
+    def generate(cls, vars: dict[str, Any] | None = None):
         """
         Returns a decorator which converts a function into an inline function.
 
-        An inline function can be defined as:
-        @InlineFunction.generate()
-        def f(): ...
-
-        We do not use something like @InlineFunction.generate or @inline
-        directly, since in the future, we might want to support passing in some
-        more arguments to determine how the inline function should be generated
-        (similar to how CallMacro.generate has a method_type argument). For
-        example, maybe we will want to support passing in a context object
-        that specifies the local variables.
+        vars can be used to specify what variable names are defined in the
+        scope of the InlineFunction. Defaults to builtins | globals | locals
+        of the scope in which generate is called.
         """
+
+        if vars is None:
+            # Get the frame that called this function
+            f_back = inspect.currentframe().f_back
+            # Dictionary union builtins, globals, locals in that order
+            vars = f_back.f_builtins | f_back.f_globals | f_back.f_locals
 
         def generate_sub(f: Callable) -> InlineFunction:
             # ast.parse returns an ast.Module, extract only the function
@@ -870,6 +890,6 @@ class InlineFunction:
                 )
 
             # Return a new instance of InlineFunction
-            return cls(inspect.signature(f), src_ast)
+            return cls(inspect.signature(f), src_ast, vars)
 
         return generate_sub
