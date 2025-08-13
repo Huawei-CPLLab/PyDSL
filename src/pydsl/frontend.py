@@ -372,6 +372,13 @@ class CompilationTarget(ABC):
     def call_function(self, fname, *args) -> Any: ...
 
     @abstractmethod
+    def get_supported_dialects(self) -> set[Dialect]:
+        """
+        Returns the list of supported dialects as a set. Intended to be used
+        by `check_module_support`.
+        """
+        ...
+
     def check_module_support(self) -> None:
         """
         This method checks over any aspect of `self` to see if the target
@@ -381,7 +388,19 @@ class CompilationTarget(ABC):
         This is called after the MLIR module is generated.
 
         To get the module, call `self.get_module`.
+
+        If not overridden, just checks whether each used dialect is in
+        `self.get_supported_dialects`.
         """
+
+        supported_dialects = self.get_supported_dialects()
+
+        for d in self.dialects():
+            if d not in supported_dialects:
+                raise ValueError(
+                    f"{d.name} dialect is not supported by "
+                    f"{type(self).__qualname__}"
+                )
 
     emit_mlir: DeliveredPromise[str]
     funcs: DeliveredPromise[dict[str, Function]]
@@ -815,9 +834,9 @@ compilation may fail entirely.
 
         return self.val_from_CType(arg_cont, f.return_type, retval_ct)
 
-    def check_module_support(self) -> None:
+    def get_supported_dialects(self) -> set[Dialect]:
         # NOTE: `transform` does NOT include `transform.validator` dialect
-        supported_dialects = {
+        return {
             Dialect.from_name("affine"),
             Dialect.from_name("arith"),
             Dialect.from_name("bufferization"),
@@ -836,12 +855,6 @@ compilation may fail entirely.
             Dialect.from_name("transform.loop"),
             Dialect.from_name("transform.structured"),
         }
-
-        for d in self.dialects():
-            if d not in supported_dialects:
-                raise ValueError(
-                    f"{d.name} dialect is not supported by CTarget"
-                )
 
 
 class PolyCTarget(CTarget):
@@ -1123,32 +1136,11 @@ class PolyCTarget(CTarget):
 
         return self.val_from_CType(f.return_type, retval_ct)
 
-    def check_module_support(self) -> None:
-        supported_dialects = {
-            Dialect.from_name("affine"),
-            Dialect.from_name("arith"),
-            Dialect.from_name("builtin"),
-            Dialect.from_name("cf"),
-            Dialect.from_name("func"),
-            Dialect.from_name("index"),
-            Dialect.from_name("linalg"),
-            Dialect.from_name("llvm"),
-            Dialect.from_name("math"),
-            Dialect.from_name("mesh"),
-            Dialect.from_name("memref"),
-            Dialect.from_name("scf"),
-            Dialect.from_name("tensor"),
-            Dialect.from_name("transform"),
-            Dialect.from_name("transform.loop"),
-            Dialect.from_name("transform.structured"),
-            Dialect.from_name("transform.validator"),
-        }
-
-        for d in self.dialects():
-            if d not in supported_dialects:
-                raise ValueError(
-                    f"{d.name} dialect is not supported by PolyCTarget"
-                )
+    def get_supported_dialects(self) -> set[Dialect]:
+        extra_supported = {Dialect.from_name("transform.validator")}
+        return (
+            super().get_supported_dialects(extra_supported) | extra_supported
+        )
 
 
 class MLIRTarget(CTarget):

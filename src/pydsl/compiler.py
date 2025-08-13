@@ -793,6 +793,7 @@ class ToMLIR(ToMLIRBase):
         created. Subclasses can override this method to register their own
         dialects.
         """
+        pass
 
     @contextmanager
     def compile(
