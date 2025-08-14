@@ -358,6 +358,10 @@ class ToMLIR(ToMLIRBase):
             case _:
                 self.visit(expr_val)
 
+    def visit_Expression(self, node: ast.Expression) -> SubtreeOut:
+        # ast.Expression is output by ast.parse(mode="eval")
+        return self.visit(node.body)
+
     def visit_Constant(self, node: ast.Constant) -> SubtreeOut:
         # TODO: Constant may not always be Number. It may also be e.g. string.
         # When other forms of constants are supported this needs to be updated.
