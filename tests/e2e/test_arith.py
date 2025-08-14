@@ -11,13 +11,16 @@ from helper import (
 )
 
 from pydsl.frontend import compile
+from pydsl.macro import CallMacro, Compiled
 from pydsl.math import abs as p_abs
+from pydsl.protocols import ToMLIRBase
 from pydsl.type import (
+    Bool,
     F32,
     F64,
-    Bool,
     Index,
     Int,
+    Number,
     SInt8,
     SInt64,
     UInt8,
@@ -392,6 +395,25 @@ def test_Number_unary():
     assert imp_un() == (-5, +5, abs(5), ~5)
 
 
+def test_Number_bool():
+    @CallMacro.generate()
+    def assert_number(visitor: ToMLIRBase, x: Compiled):
+        assert isinstance(x, Number)
+
+    @CallMacro.generate()
+    def assert_bool(visitor: ToMLIRBase, x: Compiled):
+        assert isinstance(x, Bool)
+
+    @compile()
+    def f():
+        assert_number(True or False and True)
+        assert_bool(Bool(False or True and False))
+        assert_bool(Bool(True) and False)
+        assert_bool(Bool(False) or 1)
+
+    f()
+
+
 if __name__ == "__main__":
     run(test_val_range_Int8)
     run(test_ctype_range_UInt8)
@@ -426,3 +448,4 @@ if __name__ == "__main__":
     run(test_cast_Index_to_Floats)
     run(test_SInt_unary)
     run(test_Number_unary)
+    run(test_Number_bool)
