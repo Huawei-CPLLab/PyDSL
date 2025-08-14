@@ -65,8 +65,22 @@ def test_if_else():
     assert n[0] == 5
 
 
+def test_const_if():
+    @compile()
+    def f(m: MemRefSingle):
+        if True:
+            m[0] = 123
+        else:
+            m[0] = 456
+
+    n1 = np.asarray([0], dtype=np.uint32)
+    f(n1)
+    assert n1[0] == 123
+
+
 if __name__ == "__main__":
     run(test_range_basic)
     run(test_range_implicit_type)
     run(test_if)
     run(test_if_else)
+    run(test_const_if)
