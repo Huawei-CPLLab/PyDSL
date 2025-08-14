@@ -596,24 +596,13 @@ class ToMLIR(ToMLIRBase):
                 )
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> SubtreeOut:
-        # TODO: cannot deal with cases like a: Index = 40 / 8 or
-        # a: F32 = array[i]. It's pretty ugly right now.
-        try:
-            literal = ast.literal_eval(node.value)
-        except ValueError:
-            raise NotImplementedError(
-                "assigning non-Constant literals to annotated assigns is "
-                "currently not supported"
-            )
+        val = self.visit(node.value)
+        ret_type = self.scope_stack.resolve_name(node.annotation.id)
+        ret_val = ret_type(val)
 
-        self.scope_stack.assign_name(
-            node.target.id,
-            retval := self.scope_stack.resolve_name(node.annotation.id)(
-                literal
-            ),
-        )
+        self.scope_stack.assign_name(node.target.id, ret_val)
 
-        return retval
+        return ret_val
 
     def visit_Attribute(self, node: ast.Attribute) -> SubtreeOut:
         # we only care about the last element in the attribute chain

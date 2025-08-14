@@ -1,7 +1,7 @@
 import numpy as np
 from pydsl.frontend import compile
 from pydsl.memref import MemRef
-from pydsl.type import SInt16, UInt16, Tuple
+from pydsl.type import SInt16, Tuple, UInt8, UInt16
 from helper import compilation_failed_from, run
 
 
@@ -18,6 +18,17 @@ def test_illegal_annassign():
         @compile(globals())
         def _():
             a: UInt16 = -2
+
+
+def test_non_literal_annassign():
+    @compile()
+    def f() -> UInt16:
+        a: UInt8 = 50 * 2
+        b: UInt16 = a + a
+        b = b + 100
+        return b
+
+    assert f() == 300
 
 
 def test_assign_implicit_type():
@@ -67,6 +78,7 @@ def test_chain_assign_mixed():
 if __name__ == "__main__":
     run(test_annassign)
     run(test_illegal_annassign)
+    run(test_non_literal_annassign)
     run(test_assign_implicit_type)
     run(test_assign_tuple)
     run(test_chain_assign)
