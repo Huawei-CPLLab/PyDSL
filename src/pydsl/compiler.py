@@ -228,10 +228,6 @@ class ToMLIR(ToMLIRBase):
     interceptor_stack = []
     context_stack = []
     catch_comp_error: bool = True
-    """
-    The last chain of attributes evaluated. This needs to be stored for cases
-    where it is needed by method calls that require self or cls.
-    """
 
     # Results are cached because visiting a node multiple times can result in
     # MLIR programs being generated multiple times
