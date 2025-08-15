@@ -22,7 +22,6 @@ from pydsl.protocols import canonicalize_args, SubtreeOut, ToMLIRBase
 from pydsl.type import (
     Index,
     Lowerable,
-    lower,
     lower_flatten,
     lower_single,
     SupportsIndex,
