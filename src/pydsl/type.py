@@ -275,9 +275,9 @@ class Int(metaclass=Supportable):
     def val_range(cls) -> tuple[int, int]:
         match cls.sign:
             case Sign.SIGNED:
-                return (-(1 << (cls.width - 1)), 1 << (cls.width - 1))
+                return (-(1 << (cls.width - 1)), (1 << (cls.width - 1)) - 1)
             case Sign.UNSIGNED:
-                return (0, (1 << cls.width) - 2)
+                return (0, (1 << cls.width) - 1)
             case _:
                 AssertionError("unimplemented sign")
 
@@ -464,14 +464,11 @@ class Int(metaclass=Supportable):
                 f"{pyval} cannot be converted into an Int ctype"
             ) from e
 
-        if (1 << cls.width) <= pyval:
-            raise TypeError(
-                f"{pyval} cannot fit into an Int of size {cls.width}"
-            )
-
-        if cls.sign is Sign.UNSIGNED and pyval < 0:
+        if not cls.in_range(pyval):
+            lo, hi = cls.val_range()
             raise ValueError(
-                f"expected positive pyval for unsigned Int, got {pyval}"
+                f"{pyval} cannot fit into {cls.__qualname__}, must be in "
+                f"the range [{lo}, {hi}]"
             )
 
         arg_cont.add_arg(pyval)
@@ -1060,72 +1057,71 @@ class Number:
     def Float(self, target_type: type[F]) -> F:
         return target_type(self.value)
 
-    def Index(self) -> "Index":
+    def Index(self) -> Index:
         return Index(self.value)
+
+    def Bool(self) -> Bool:
+        return Bool(self.value)
 
 
 # These are for unary operators in Number class
-UnNumberOp = namedtuple(
-    "UnNumberOp", "dunder_name, internal_op, default_ret_type"
-)
+UnNumberOp = namedtuple("UnNumberOp", "dunder_name, internal_op")
 un_number_op = {
-    UnNumberOp("op_neg", operator.neg, Number),
-    UnNumberOp("op_not", operator.not_, Number),
-    UnNumberOp("op_pos", operator.pos, Number),
-    UnNumberOp("op_abs", operator.abs, Number),
-    UnNumberOp("op_truth", operator.truth, Number),
-    UnNumberOp("op_floor", math.floor, Number),
-    UnNumberOp("op_ceil", math.ceil, Number),
-    UnNumberOp("op_round", round, Number),
-    UnNumberOp("op_invert", operator.invert, Number),
-    # Support CompileTimeTestable
-    UnNumberOp("Bool", operator.truth, Number),
+    UnNumberOp("op_neg", operator.neg),
+    UnNumberOp("op_not", operator.not_),
+    UnNumberOp("op_pos", operator.pos),
+    UnNumberOp("op_abs", operator.abs),
+    UnNumberOp("op_truth", operator.truth),
+    UnNumberOp("op_floor", math.floor),
+    UnNumberOp("op_ceil", math.ceil),
+    UnNumberOp("op_round", round),
+    UnNumberOp("op_invert", operator.invert),
 }
 
 for tup in un_number_op:
 
-    def method_gen(op):
+    def method_gen(tup):
         """
         This function exists simply to allow a unique generic_unary_op to be
         generated whose variables are bound to the arguments of this function
         rather than the variable of the for loop.
         """
-        _, internal_op, default_ret_type = tup
+        # TODO: why is the above useful? What's wrong with binding to for loop
+        # variables?
+        _, internal_op = tup
 
         # perform the unary operation on the underlying value
-        def generic_unary_op(
-            self: "Number", *args, **kwargs
-        ) -> numbers.Number:
-            return default_ret_type(internal_op(self.value))
+        def generic_unary_op(self: Number) -> Number:
+            return Number(internal_op(self.value))
 
         return generic_unary_op
 
-    ldunder_name, internal_op, rdunder_name = tup
+    ldunder_name, internal_op = tup
     setattr(Number, ldunder_name, method_gen(tup))
 
 # These are for binary operators in Number
 BinNumberOp = namedtuple(
-    "BinNumberOp", "ldunder_name, internal_op, rdunder_name, default_ret_type"
+    "BinNumberOp", "ldunder_name, internal_op, rdunder_name"
 )
 bin_number_op = {
-    BinNumberOp("op_add", operator.add, "op_radd", Number),
-    BinNumberOp("op_sub", operator.sub, "op_rsub", Number),
-    BinNumberOp("op_mul", operator.mul, "op_rmul", Number),
-    BinNumberOp("op_truediv", operator.truediv, "op_rtruediv", Number),
-    BinNumberOp("op_pow", operator.pow, "op_rpow", Number),
-    BinNumberOp("op_divmod", divmod, "op_rdivmod", Number),
-    BinNumberOp("op_floordiv", operator.floordiv, "op_rfloordiv", Number),
-    BinNumberOp("op_mod", operator.mod, "op_rmod", Number),
-    BinNumberOp("op_lshift", operator.lshift, "op_rlshift", Number),
-    BinNumberOp("op_rshift", operator.rshift, "op_rrshift", Number),
-    BinNumberOp("op_and", operator.and_, "op_rand", Number),
-    BinNumberOp("op_xor", operator.xor, "op_rxor", Number),
-    BinNumberOp("op_or", operator.or_, "op_ror", Number),
-    BinNumberOp("op_lt", operator.lt, "op_gt", Bool),
-    BinNumberOp("op_le", operator.le, "op_ge", Bool),
-    BinNumberOp("op_eq", operator.le, "op_eq", Bool),
-    BinNumberOp("op_ge", operator.ge, "op_le", Bool),
-    BinNumberOp("op_gt", operator.gt, "op_lt", Bool),
+    BinNumberOp("op_add", operator.add, "op_radd"),
+    BinNumberOp("op_sub", operator.sub, "op_rsub"),
+    BinNumberOp("op_mul", operator.mul, "op_rmul"),
+    BinNumberOp("op_truediv", operator.truediv, "op_rtruediv"),
+    BinNumberOp("op_pow", operator.pow, "op_rpow"),
+    BinNumberOp("op_divmod", divmod, "op_rdivmod"),
+    BinNumberOp("op_floordiv", operator.floordiv, "op_rfloordiv"),
+    BinNumberOp("op_mod", operator.mod, "op_rmod"),
+    BinNumberOp("op_lshift", operator.lshift, "op_rlshift"),
+    BinNumberOp("op_rshift", operator.rshift, "op_rrshift"),
+    BinNumberOp("op_and", operator.and_, "op_rand"),
+    BinNumberOp("op_xor", operator.xor, "op_rxor"),
+    BinNumberOp("op_or", operator.or_, "op_ror"),
+    BinNumberOp("op_lt", operator.lt, "op_gt"),
+    BinNumberOp("op_le", operator.le, "op_ge"),
+    BinNumberOp("op_eq", operator.le, "op_eq"),
+    BinNumberOp("op_ge", operator.ge, "op_le"),
+    BinNumberOp("op_gt", operator.gt, "op_lt"),
 }
 
 
@@ -1145,20 +1141,20 @@ for tup in bin_number_op:
         generated whose variables are bound to the arguments of this function
         rather than the variable of the for loop.
         """
-        _, internal_op, rdunder_name, default_ret_type = tup
+        _, internal_op, rdunder_name = tup
 
-        def generic_bin_op(self: "Number", rhs: NumberLike) -> NumberLike:
+        def generic_bin_op(self: Number, rhs: NumberLike) -> NumberLike:
             # if RHS is also a Number
             if isinstance(rhs, Number):
                 # perform the binary operation on the underlying values
-                return default_ret_type(internal_op(self.value, rhs.value))
+                return Number(internal_op(self.value, rhs.value))
 
-            # otherwise use RHS' implementation instead
+            # otherwise use RHS's implementation instead
             return getattr(rhs, rdunder_name)(self)
 
         return generic_bin_op
 
-    ldunder_name, internal_op, rdunder_name, default_ret_type = tup
+    ldunder_name, internal_op, rdunder_name = tup
     setattr(Number, ldunder_name, method_gen(tup))
 
 
