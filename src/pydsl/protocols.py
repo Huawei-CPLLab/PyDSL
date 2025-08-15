@@ -236,6 +236,13 @@ def handle_CompileTimeCallable(
     while True:
         x = attr_chain[-1]
 
+        if type(x).__name__ == "JITFunction":
+            # This is a Triton JIT function
+            # Import here, not earlier, in case the user doesn't have Triton
+            from pydsl.triton import handle_TritonCallable
+
+            return handle_TritonCallable(visitor, node, x)
+
         match x:
             case _ if issubclass(type(x), type):
                 # if x is a class, fetch its on_Call

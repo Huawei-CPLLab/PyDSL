@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import cache, reduce
 from typing import Any, Iterator
 
-from mlir.dialects import arith, scf
+from mlir.dialects import arith, scf, func
 import mlir.ir as mlirir
 from mlir.ir import (
     Context,
@@ -228,6 +228,15 @@ class ToMLIR(ToMLIRBase):
     interceptor_stack = []
     context_stack = []
     catch_comp_error: bool = True
+    module: mlirir.Module = None
+    triton_funcs: dict[
+        str, dict[tuple[str, ...], func.FuncOp]
+    ] = {}  # stores all triton functions
+    # which have been added during compilation and their signatures
+    """
+    The last chain of attributes evaluated. This needs to be stored for cases
+    where it is needed by method calls that require self or cls.
+    """
 
     # Results are cached because visiting a node multiple times can result in
     # MLIR programs being generated multiple times
@@ -298,6 +307,7 @@ class ToMLIR(ToMLIRBase):
     def setup(self) -> None:
         self.module = None
         self.scope_stack = ScopeStack(self.f_locals)
+        self.triton_funcs = {}
 
     def visit_Slice(self, node: ast.Slice):
         lo = None if node.lower is None else Index(self.visit(node.lower))
@@ -1001,6 +1011,7 @@ class Module:
 
     def build_body(self, visitor: ToMLIR, node: ast.Module) -> Iterator[None]:
         self.module = mlirir.Module.create()
+        visitor.module = self.module
 
         with self.insert():
             # Full-module initialization
