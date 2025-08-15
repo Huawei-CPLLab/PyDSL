@@ -385,7 +385,7 @@ def test_reduce_non_commutative():
 
     @compile()
     def f(arr: MemRef[UInt8, 4, 4]) -> UInt64:
-        out = alloca(MemRef[UInt64])
+        out = alloca((), UInt64)
         linalg.reduce(combine, arr, init=out, dims=[0, 1])
         return out[()]
 
