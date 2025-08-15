@@ -275,9 +275,9 @@ class Int(metaclass=Supportable):
     def val_range(cls) -> tuple[int, int]:
         match cls.sign:
             case Sign.SIGNED:
-                return (-(1 << (cls.width - 1)), 1 << (cls.width - 1))
+                return (-(1 << (cls.width - 1)), (1 << (cls.width - 1)) - 1)
             case Sign.UNSIGNED:
-                return (0, (1 << cls.width) - 2)
+                return (0, (1 << cls.width) - 1)
             case _:
                 AssertionError("unimplemented sign")
 
@@ -464,14 +464,11 @@ class Int(metaclass=Supportable):
                 f"{pyval} cannot be converted into an Int ctype"
             ) from e
 
-        if (1 << cls.width) <= pyval:
-            raise TypeError(
-                f"{pyval} cannot fit into an Int of size {cls.width}"
-            )
-
-        if cls.sign is Sign.UNSIGNED and pyval < 0:
+        if not cls.in_range(pyval):
+            lo, hi = cls.val_range()
             raise ValueError(
-                f"expected positive pyval for unsigned Int, got {pyval}"
+                f"{pyval} cannot fit into {cls.__qualname__}, must be in "
+                f"the range [{lo}, {hi}]"
             )
 
         arg_cont.add_arg(pyval)
