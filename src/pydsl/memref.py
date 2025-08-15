@@ -30,6 +30,7 @@ from pydsl.protocols import (
 from pydsl.type import (
     Index,
     Lowerable,
+    Number,
     Slice,
     SupportsIndex,
     Tuple,
@@ -848,3 +849,34 @@ def subtree_to_slices(
             return [key]
         case _:
             raise TypeError(f"{type(key)} cannot be used as a subscript")
+
+
+def split_static_dynamic_dims(
+    shape: Iterable[Number | SupportsIndex],
+) -> tuple[list[int], list[Index]]:
+    """
+    Given a shape with both static and dynamic dimensions, returns two lists:
+    static_shape and dynamic_sizes. static_shape is the same as shape, with all
+    dynamic dimensions replaced with the constant DYNAMIC. dynamic_sizes is a
+    list containing only the dynamic sizes, in order. Thus, it is true
+    that len(static_shape) == len(shape) and len(dynamic_dims) <= len(shape).
+    Raises a ValueError if the elements of shape are not Number or
+    SupportsIndex.
+    """
+    static_shape = []
+    dynamic_sizes = []
+
+    for s in shape:
+        match s:
+            case Number():
+                static_shape.append(int(s.value))
+            case SupportsIndex():
+                static_shape.append(DYNAMIC)
+                dynamic_sizes.append(Index(s))
+            case _:
+                raise ValueError(
+                    f"dimension size should have type Number or Index, got "
+                    f"{type(s).__qualname__}"
+                )
+
+    return static_shape, dynamic_sizes

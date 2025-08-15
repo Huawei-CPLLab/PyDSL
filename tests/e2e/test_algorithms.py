@@ -11,6 +11,7 @@ from pydsl.frontend import compile
 from pydsl.func import InlineFunction
 import pydsl.linalg as linalg
 from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
+import pydsl.tensor as tensor
 from pydsl.tensor import Tensor
 from pydsl.scf import range
 from pydsl.transform import (
@@ -359,13 +360,9 @@ def test_softmax():
 
         return arr
 
-    # TODO: reduce_res should be allocated with tensor.empty, but tensor.empty
-    # is not really functional right now
     @compile()
-    def softmax_tensor(
-        arr: Tensor[F64, N, M], reduce_res: Tensor[F64, N]
-    ) -> Tensor[F64, N, M]:
-        reduce_res = linalg.fill(reduce_res, neg_inf)
+    def softmax_tensor(arr: Tensor[F64, N, M]) -> Tensor[F64, N, M]:
+        reduce_res = tensor.full((N_num,), neg_inf, F64)
         reduce_res = linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
         mx = linalg.broadcast(reduce_res, out=arr, dims=[1])
 
@@ -386,7 +383,7 @@ def test_softmax():
     memref_res = softmax_memref(arr.copy())
     assert np.allclose(memref_res, cor_res)
 
-    tensor_res = softmax_tensor(arr.copy(), np.empty(N, dtype=np.float64))
+    tensor_res = softmax_tensor(arr.copy())
     assert np.allclose(tensor_res, cor_res)
 
 
