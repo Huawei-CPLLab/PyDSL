@@ -426,9 +426,13 @@ class ToMLIR(ToMLIRBase):
 
         match node.op:
             case ast.And():
-                reducer = lambda a, b: a.op_and(b)
+
+                def reducer(a, b):
+                    return a.op_and(b)
             case ast.Or():
-                reducer = lambda a, b: a.op_or(b)
+
+                def reducer(a, b):
+                    return a.op_or(b)
             case _:
                 raise SyntaxError(
                     f"{type(node.op)} is not supported as a boolean operator"
@@ -716,6 +720,17 @@ class ToMLIR(ToMLIRBase):
                         f"Bool, got {test}"
                     )
 
+                if isinstance(test, Number):
+                    # we can do constant folding
+                    if test.value:
+                        for b in body:
+                            self.visit(b)
+                    else:
+                        for b in orelse:
+                            self.visit(b)
+
+                    return
+
                 if_exp = scf.IfOp(
                     lower_single(test.Bool()),
                     [],  # results are empty for now
@@ -740,6 +755,14 @@ class ToMLIR(ToMLIRBase):
 
     def visit_IfExp(self, node: ast.IfExp) -> SubtreeOut:
         test = self.visit(node.test)
+
+        if isinstance(test, Number):
+            # we can do constant folding
+            if test.value:
+                return self.visit(node.body)
+            else:
+                return self.visit(node.orelse)
+
         body = self.visit(node.body)
         orelse = self.visit(node.orelse)
 
@@ -801,10 +824,12 @@ class ToMLIR(ToMLIRBase):
         # compilation
         generate_parent(
             node
-        )  # FIXME: this shouldn't be done as it's an illegal field and it mutates the tree (we are not allowed to mutate)
+            # FIXME: this shouldn't be done as it's an illegal field and it mutates the tree (we are not allowed to mutate)
+        )
         generate_next_line(
             node
-        )  # FIXME: this shouldn't be done as it's an illegal field and it mutates the tree (we are not allowed to mutate)
+            # FIXME: this shouldn't be done as it's an illegal field and it mutates the tree (we are not allowed to mutate)
+        )
 
         self.setup()
 
