@@ -37,6 +37,8 @@ export PATH=$HOME/.venv/bin:$PATH
 cd ~
 time git clone https://github.com/Huawei-CPLLab/PyDSL.git --recurse-submodules --shallow-submodules
 
+python -m pip install -r PyDSL/requirements.txt
+
 # MLIR Python bindings
 mkdir ~/tmp
 cd PyDSL/llvm-project
