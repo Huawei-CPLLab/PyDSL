@@ -1,5 +1,6 @@
 import math
 import itertools
+from contextlib import nullcontext
 
 from helper import (
     f32_edges,
@@ -10,12 +11,16 @@ from helper import (
 )
 
 from pydsl.frontend import compile
+from pydsl.macro import CallMacro, Compiled
 from pydsl.math import abs as p_abs
+from pydsl.protocols import ToMLIRBase
 from pydsl.type import (
+    Bool,
     F32,
     F64,
-    Bool,
     Index,
+    Int,
+    Number,
     SInt8,
     SInt64,
     UInt8,
@@ -24,24 +29,60 @@ from pydsl.type import (
 )
 
 
-def test_illegal_unfit_Int_input():
-    with failed_from(TypeError):
+# TODO: rewrite with templates
+def test_val_range_Int8():
+    def check(typ: type[Int], val: int, good: bool) -> None:
+        with nullcontext() if good else compilation_failed_from(ValueError):
 
-        @compile(globals())
-        def f(_: UInt8):
-            pass
+            @compile()
+            def f() -> typ:
+                return typ(val)
 
-        f(1 << 8)
+            assert f() == val
+
+    check(UInt8, 0, True)
+    check(UInt8, 123, True)
+    check(UInt8, 255, True)
+    check(UInt8, -1, False)
+    check(UInt8, 256, False)
+
+    check(SInt8, -128, True)
+    check(SInt8, 12, True)
+    check(SInt8, 127, True)
+    check(SInt8, -129, False)
+    check(SInt8, 128, False)
 
 
-def test_illegal_Int_sign_input():
-    with failed_from(ValueError):
+def test_ctype_range_UInt8():
+    @compile()
+    def f(x: UInt8) -> UInt8:
+        return x
 
-        @compile(globals())
-        def f(_: UInt8):
-            pass
+    def check(val: int, good: bool) -> None:
+        with nullcontext() if good else failed_from(ValueError):
+            assert f(val) == val
 
-        f(-1)
+    check(0, True)
+    check(98, True)
+    check(255, True)
+    check(-1, False)
+    check(256, False)
+
+
+def test_ctype_range_SInt8():
+    @compile()
+    def f(x: SInt8) -> SInt8:
+        return x
+
+    def check(val: int, good: bool) -> None:
+        with nullcontext() if good else failed_from(ValueError):
+            assert f(val) == val
+
+    check(-128, True)
+    check(-56, True)
+    check(127, True)
+    check(-129, False)
+    check(128, False)
 
 
 def test_cast_UInt8_to_Floats():
@@ -354,9 +395,29 @@ def test_Number_unary():
     assert imp_un() == (-5, +5, abs(5), ~5)
 
 
+def test_Number_bool():
+    @CallMacro.generate()
+    def assert_number(visitor: ToMLIRBase, x: Compiled):
+        assert isinstance(x, Number)
+
+    @CallMacro.generate()
+    def assert_bool(visitor: ToMLIRBase, x: Compiled):
+        assert isinstance(x, Bool)
+
+    @compile()
+    def f():
+        assert_number(True or False and True)
+        assert_bool(Bool(False or True and False))
+        assert_bool(Bool(True) and False)
+        assert_bool(Bool(False) or 1)
+
+    f()
+
+
 if __name__ == "__main__":
-    run(test_illegal_unfit_Int_input)
-    run(test_illegal_Int_sign_input)
+    run(test_val_range_Int8)
+    run(test_ctype_range_UInt8)
+    run(test_ctype_range_SInt8)
     run(test_cast_UInt8_to_Floats)
     run(test_cast_UInt64_to_Floats)
     run(test_cast_SInt8_to_Floats)
@@ -387,3 +448,4 @@ if __name__ == "__main__":
     run(test_cast_Index_to_Floats)
     run(test_SInt_unary)
     run(test_Number_unary)
+    run(test_Number_bool)
