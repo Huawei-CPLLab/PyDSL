@@ -378,9 +378,13 @@ class ToMLIR(ToMLIRBase):
     def visit_BinOp(self, node: ast.BinOp) -> SubtreeOut:
         left = self.visit(node.left)
         right = self.visit(node.right)
+        return self.eval_binop(left, node.op, right)
 
-        # TODO: this does not yet support the right variants
-        match node.op:
+    # TODO: this does not yet support the right variants
+    def eval_binop(
+        self, left: SubtreeOut, op: ast.operator, right: SubtreeOut
+    ) -> SubtreeOut:
+        match op:
             case ast.Add():
                 return left.op_add(right)
             case ast.Sub():
@@ -415,7 +419,7 @@ class ToMLIR(ToMLIRBase):
             # TODO: more ops can be added in the future
             case _:
                 raise SyntaxError(
-                    f"{type(node.op)} is not supported as a binary operator"
+                    f"{type(op)} is not supported as a binary operator"
                 )
 
     def visit_BoolOp(self, node: ast.BoolOp) -> SubtreeOut:
@@ -605,6 +609,30 @@ class ToMLIR(ToMLIRBase):
                     f"assigning to {type(target).__name__} is currently not "
                     f"supported."
                 )
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> SubtreeOut:
+        # make separate load/store context
+        # while ensuring the target is evaluated only once (handles side-effects safely)
+        match node.target:
+            case ast.Subscript(value=v, slice=s, ctx=_):
+                val, slc = self.visit(v), self.visit(s)
+                read_t = ast.Subscript(value=val, slice=slc, ctx=ast.Load())
+                store_t = ast.Subscript(value=val, slice=slc, ctx=ast.Store())
+            case ast.Name(id=i, ctx=_):
+                read_t = ast.Name(id=i, ctx=ast.Load())
+                store_t = ast.Name(id=i, ctx=ast.Store())
+            case other:
+                raise TypeError(
+                    f"unsupported AugAssign target: {ast.dump(other)}"
+                )
+
+        # compute new value
+        new_val = self.eval_binop(
+            self.visit(read_t), node.op, self.visit(node.value)
+        )
+        # assign back to the visited target
+        self.visit_assignment(store_t, new_val)
+        return new_val
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> SubtreeOut:
         val = self.visit(node.value)
