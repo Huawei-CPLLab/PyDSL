@@ -165,6 +165,27 @@ def test_cast_F64_to_Floats():
         assert f32_isclose(i, f64)
 
 
+def test_cast_Ints_to_Index():
+    def check(typ: type[Int], val: int, good: bool) -> None:
+        with nullcontext() if good else compilation_failed_from(TypeError):
+
+            @compile()
+            def cast(a: typ) -> Index:
+                return Index(a)
+
+            assert cast(val) == val, f"{cast(val)} != {val}"
+
+    check(UInt8, 0, True)
+    check(UInt8, 123, True)
+    check(UInt8, 255, True)
+
+    check(UInt64, 0, True)
+    check(UInt64, 0x7FFF_FFFF_FFFF_FFFF, True)
+    check(UInt64, 0xFFFF_FFFF_FFFF_FFFF, True)
+
+    check(SInt8, 0, False)
+
+
 def test_bad_cast_by_instance():
     # If the CallMacro for casting is not set up correctly (e.g. using method
     # type CLASS instead of CLASS_ONLY), this could compile.
@@ -424,6 +445,7 @@ if __name__ == "__main__":
     run(test_cast_SInt64_to_Floats)
     run(test_cast_F32_to_Floats)
     run(test_cast_F64_to_Floats)
+    run(test_cast_Ints_to_Index)
     run(test_bad_cast_by_instance)
     run(test_UInt8_addition)
     run(test_UInt64_addition)

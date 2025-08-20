@@ -310,6 +310,20 @@ class Int(metaclass=Supportable):
     def _try_casting(cls, val) -> None:
         return cls(val)
 
+    def Index(self) -> "Index":
+        if self.sign != Index.sign:
+            raise TypeError(
+                f"{type(self)} cannot be casted into Index because of sign"
+            )
+
+        if self.width > Index.width:
+            raise TypeError(
+                f"Int of width {self.width} cannot be casted into Index. "
+                f"Width must be extended to {Index.width}"
+            )
+
+        return Index(self.value)
+
     def op_abs(self) -> "Int":
         return self._try_casting(mlirmath.AbsIOp(self.value))
 
@@ -900,13 +914,17 @@ class Index(Int, width=get_index_width(), sign=Sign.UNSIGNED):
         )
 
     def _init_from_mlir_value(self, rep) -> None:
-        if (rep_type := type(rep.type)) is not IndexType:
+        if (rep_type := type(rep.type)) is IndexType:
+            self.value = rep
+        elif (rep_type := type(rep.type)) is IntegerType:
+            self.value = arith.IndexCastUIOp(
+                lower_single(Index), lower_single(rep)
+            ).result
+        else:
             raise TypeError(
                 f"{rep_type.__name__} cannot be casted as a "
                 f"{type(self).__name__}"
             )
-
-        self.value = rep
 
     def _same_type_assertion(self, val):
         if type(self) is not type(val):
