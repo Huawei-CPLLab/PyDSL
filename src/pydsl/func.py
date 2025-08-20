@@ -21,6 +21,7 @@ from pydsl.protocols import (
     Lowerable,
     SubtreeOut,
     ToMLIRBase,
+    canonicalize_args,
     lower,
     lower_flatten,
 )
@@ -158,6 +159,7 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         return f
 
     @classmethod
+    @canonicalize_args
     @cache
     def node_to_header(
         cls, visitor: ToMLIRBase, node: ast.FunctionDef
@@ -196,6 +198,7 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         return cls.class_factory(args, ret)
 
     @classmethod
+    @canonicalize_args
     @cache
     def class_factory(
         cls,

@@ -20,7 +20,13 @@ from mlir.ir import (
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
 from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.protocols import ArgContainer, SubtreeOut, ToMLIRBase, lower
+from pydsl.protocols import (
+    ArgContainer,
+    canonicalize_args,
+    SubtreeOut,
+    ToMLIRBase,
+    lower,
+)
 from pydsl.type import (
     Index,
     Lowerable,
@@ -384,6 +390,7 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     ]
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
         shape: tuple[int],

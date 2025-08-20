@@ -23,7 +23,7 @@ from pydsl.type import (
     SupportsIndex,
     Tuple,
 )
-from pydsl.protocols import SubtreeOut, ToMLIRBase
+from pydsl.protocols import canonicalize_args, SubtreeOut, ToMLIRBase
 
 DYNAMIC = -9223372036854775808
 
@@ -57,6 +57,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     ]
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
         shape: tuple[int], element_type, *, name=_default_subclass_name
