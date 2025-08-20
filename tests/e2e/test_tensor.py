@@ -348,6 +348,31 @@ def test_ones():
     assert (test_res == cor_res).all()
 
 
+def test_cast():
+    @compile()
+    def f(t1: Tensor[F32, DYNAMIC, 32, 5]) -> Tensor[F32, 64, 32, DYNAMIC]:
+        t2 = t1.cast((64, 32, DYNAMIC))
+        return t2
+
+    n1 = multi_arange((64, 32, 5), np.float32)
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_bad():
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f1(t1: Tensor[SInt32, DYNAMIC, 13]):
+            t1.cast((7, 13, DYNAMIC))
+
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f2(t1: Tensor[UInt64, 3, 7]):
+            t1.cast((1, 21))
+
+
 if __name__ == "__main__":
     run(test_wrong_dim)
     run(test_load)
@@ -372,3 +397,5 @@ if __name__ == "__main__":
     run(test_full)
     run(test_zeros)
     run(test_ones)
+    run(test_cast)
+    run(test_cast_bad)

@@ -8,8 +8,9 @@ import mlir.ir as mlir
 from mlir.ir import DenseI64ArrayAttr, OpView, RankedTensorType, Value
 
 from pydsl.func import InlineFunction
-from pydsl.macro import CallMacro, Compiled, Evaluated
+from pydsl.macro import CallMacro, Compiled, Evaluated, MethodType
 from pydsl.memref import (
+    assert_shapes_compatible,
     UsesRMRD,
     RuntimeMemrefShape,
     slices_to_mlir_format,
@@ -274,6 +275,44 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
 
         # Equivalent to cls.__class_getitem__(args)
         return cls[args]
+
+    @CallMacro.generate(method_type=MethodType.INSTANCE)
+    def cast(
+        visitor: ToMLIRBase, self: typing.Self, shape: Evaluated
+    ) -> typing.Self:
+        """
+        Convert a tensor from one type to an equivalent type without changing
+        any data elements. The resulting tensor type will have the same element
+        type. shape is the shape of the new tensor and must be known at compile
+        time. For any constant dimensions of shape, the input tensor must
+        actually have that dimension at runtime, otherwise the operation is
+        invalid.
+
+        Note: this function only returns a tensor with the updated type, it
+        does not modify the type of the input tensor.
+
+        Example:
+        ```
+        def f(t1: Tensor[F32, DYNAMIC, 32, 5]) -> Tensor[F32, 64, 32, DYNAMIC]:
+            # Only valid if the first dimension of t1 is always 64
+            t2 = t1.cast((64, 32, DYNAMIC))
+            return t2
+        ```
+        """
+
+        shape = tuple(shape)
+
+        if not all(isinstance(x, int) for x in shape):
+            raise TypeError(
+                f"shape should be a tuple of integers known at compile time ",
+                f"got {repr(shape)}",
+            )
+
+        assert_shapes_compatible(self.shape, shape)
+
+        result_type = self.class_factory(shape, self.element_type)
+        rep = tensor.cast(lower_single(result_type), lower_single(self))
+        return result_type(rep)
 
 
 # Convenient alias
