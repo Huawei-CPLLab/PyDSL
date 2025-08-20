@@ -596,8 +596,13 @@ class Function(FunctionLike):
         self = attr_chain[-1]
         prefix_args = [visitor.visit(a) for a in prefix_args]
         args = [visitor.visit(a) for a in node.args]
+        args = [
+            a if isinstance(a, t) else t(a) for t, a in zip(self.argst, args)
+        ]
 
-        return func.CallOp(self.val, lower_flatten([*prefix_args, *args]))
+        rst = func.CallOp(self.val, lower_flatten([*prefix_args, *args]))
+
+        return self.rett(rst) if self.rett is not None else rst
 
 
 class TransformSequence(FunctionLike):

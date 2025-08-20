@@ -264,6 +264,55 @@ def test_body_func():
     assert CallTest.f1() == 12
 
 
+def test_arg_cast():
+    @compile()
+    class Mod:
+        def f(a: UInt32) -> UInt64:
+            return a
+
+        def g(a: UInt16) -> UInt64:
+            return f(a)
+
+    assert Mod.g(42) == 42
+
+
+def test_ret_cast():
+    @compile()
+    class Mod:
+        def f(a: UInt32) -> UInt32:
+            return a
+
+        def g(a: UInt32) -> UInt64:
+            return f(a)
+
+    assert Mod.g(42) == 42
+
+
+def test_ret_tuple():
+    @compile()
+    class Mod:
+        def f(a: UInt32) -> Tuple[UInt32, UInt32]:
+            return a, a + 1
+
+        def g(a: UInt32) -> UInt64:
+            (b, c) = f(a)
+            return c
+
+    assert Mod.g(42) == 43
+
+
+def test_multi_func_cast():
+    @compile()
+    class Mod:
+        def my_add(a: UInt16, b: UInt16) -> UInt64:
+            return a + b
+
+        def triple_add(a: UInt16, b: UInt16, c: UInt16) -> UInt64:
+            return my_add(a, b) + c
+
+    assert Mod.triple_add(20000, 30000, 40000) == 20000 + 30000 + 40000
+
+
 def test_recursion():
     @compile()
     def recursion(i: Index, m: MemRef[UInt16, 5]):
@@ -494,6 +543,10 @@ if __name__ == "__main__":
     run(test_return_casting_tuple_2)
     run(test_module_call_basic)
     run(test_body_func)
+    run(test_arg_cast)
+    run(test_ret_cast)
+    run(test_ret_tuple)
+    run(test_multi_func_cast)
     run(test_recursion)
     run(test_inline_func_basic)
     run(test_inline_func_cast)
