@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import collections.abc as cabc
 import ctypes
@@ -1218,10 +1220,12 @@ class Tuple(typing.Generic[*DTypes]):
     # TODO: this will temporarily perform casting of other tuples
     # but later we will need to do a major refactor that shifts this behavior
     # to a dedicated member function called `cast`.
-    def __init__(self, iterable: typing.Union[cabc.Iterable, "Tuple"]):
+    def __init__(self, iterable: cabc.Iterable | Tuple | mlir.OpView):
         # this is the very bad casting code mentioned in the todo
         if isinstance(iterable, Tuple):
             iterable = iterable.value
+        elif isinstance(iterable, mlir.OpView):
+            iterable = iterable.results
 
         error = TypeError(
             f"Tuple with dtypes {[t.__name__ for t in self.dtypes]} "
