@@ -644,11 +644,12 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 
         if len(key_list) != dim:
             raise IndexError(
-                f"number of indices must be the same as the rank of a MemRef when storing: `"
-                f"rank is {dim}, but number of indices is {len(key_list)}"
+                f"number of indices must be the same as the rank of a MemRef "
+                f"when storing: rank is {dim}, but number of indices is "
+                f"{len(key_list)}"
             )
 
-        raise TypeError("cannot store to a slice of a MemRef")
+        raise TypeError("cannot store to a slice of a MemRef, use memref.copy")
 
     @classmethod
     def __class_getitem__(cls, args: tuple):
@@ -814,6 +815,35 @@ def dealloc(visitor: ToMLIRBase, mem: Compiled) -> None:
         )
 
     return memref.dealloc(lower_single(mem))
+
+
+@CallMacro.generate()
+def copy(visitor: ToMLIRBase, src: Compiled, dst: Compiled) -> None:
+    """
+    Copies data from src to dst. src and dst must have the same shape at
+    runtime, otherwise the behaviour is undefined. src and dst do not need to
+    have the same layout.
+    """
+
+    if not (isinstance(src, MemRef) and isinstance(dst, MemRef)):
+        raise ValueError(
+            f"operands of memref.copy must be MemRefs, got {type(src)} and "
+            f"{type(dst)}"
+        )
+
+    if not are_shapes_compatible(src.shape, dst.shape):
+        raise ValueError(
+            f"operands of memref.copy must have the same shape, got "
+            f"{src.shape} and {dst.shape}"
+        )
+
+    if src.element_type != dst.element_type:
+        raise ValueError(
+            f"operands of memref.copy must have the same element type, got "
+            f"{src.element_type} and {dst.element_type}"
+        )
+
+    memref.copy(lower_single(src), lower_single(dst))
 
 
 def slices_to_mlir_format(

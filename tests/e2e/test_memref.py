@@ -8,6 +8,7 @@ from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
 from pydsl.gpu import GPU_AddrSpace
 import pydsl.linalg as linalg
+import pydsl.memref as memref
 from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory
 from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
@@ -445,16 +446,69 @@ def test_chain_link_ndarray():
 
 def test_zero_d():
     @compile()
-    def f(t1: MemRef[UInt32]) -> Tuple[UInt32, MemRef[UInt32]]:
-        x = t1[()]
-        t1[()] = 456
-        return x, t1
+    def f(m1: MemRef[UInt32]) -> Tuple[UInt32, MemRef[UInt32]]:
+        x = m1[()]
+        m1[()] = 456
+        return x, m1
 
     n1 = np.array(123, dtype=np.uint32)
     res1, res2 = f(n1)
     assert res1 == 123 and res2 == 456
     assert isinstance(res2, np.ndarray)
     assert res2.shape == ()
+
+
+def test_copy_basic():
+    @compile()
+    def f(m1: MemRef[SInt16, 10, DYNAMIC], m2: MemRef[SInt16, 10, 10]):
+        memref.copy(m1, m2)
+
+    n1 = multi_arange((10, 10), np.int16)
+    n2 = np.zeros((10, 10), dtype=np.int16)
+    cor_res = n1.copy()
+    f(n1, n2)
+    assert (n2 == cor_res).all()
+
+
+def test_copy_overlap():
+    @compile()
+    def f(m1: MemRef[UInt32, 4000, 2000]):
+        memref.copy(m1[100:3000], m1[600:3500])
+        memref.copy(m1[1000:, :1900], m1[300:3300, 100:])
+
+    n1 = multi_arange((4000, 2000), dtype=np.uint32)
+    cor_res = n1.copy()
+    cor_res[600:3500] = cor_res[100:3000]
+    cor_res[300:3300, 100:] = cor_res[1000:, :1900]
+    f(n1)
+    assert (n1 == cor_res).all()
+
+
+def test_copy_strided():
+    @compile()
+    def f(m1: MemRef[F32, 10, 10], m2: MemRef[F32, 8, 9]):
+        memref.copy(m1[1::3, ::2], m2[3::2, 3:8])
+
+    n1 = multi_arange((10, 10), np.float32)
+    n2 = multi_arange((8, 9), np.float32) + 1000
+    cor_res = n2
+    cor_res[3::2, 3:8] = n1[1::3, ::2]
+    f(n1, n2)
+    assert np.allclose(n2, cor_res)
+
+
+def test_copy_bad():
+    with compilation_failed_from(ValueError):
+        # Different shapes
+        @compile()
+        def f(m1: MemRef[F32, 5], m2: MemRef[F32, 6]):
+            memref.copy(m1, m2)
+
+    with compilation_failed_from(ValueError):
+        # Different types
+        @compile()
+        def f(m1: MemRef[F32, 5], m2: MemRef[F64, 5]):
+            memref.copy(m1, m2)
 
 
 if __name__ == "__main__":
@@ -482,3 +536,7 @@ if __name__ == "__main__":
     run(test_link_ndarray)
     run(test_chain_link_ndarray)
     run(test_zero_d)
+    run(test_copy_basic)
+    run(test_copy_overlap)
+    run(test_copy_strided)
+    run(test_copy_bad)
