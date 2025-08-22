@@ -460,6 +460,71 @@ def test_broadcast_bad_shapes():
             linalg.broadcast(arr, out=out, dims=[0])
 
 
+def test_matmul():
+    M, K, N = 3, 4, 5
+
+    def test(typA: type, typB: type, typC: type) -> None:
+        @compile()
+        def f(A: typA, B: typB, init: typC) -> typC:
+            # A: [M, K]
+            # B: [K, N]
+            return linalg.matmul(A, B, init=init)
+
+        A = multi_arange((M, K), np.float64)
+        B = multi_arange((K, N), np.float64)
+        C = multi_arange((M, N), np.float64)
+
+        expect = A @ B + C
+
+        rst = f(A.copy(), B.copy(), C)
+
+        assert np.allclose(rst, expect)
+        assert np.allclose(C, expect)
+
+    TensorF64_A = TensorFactory((M, K), F64)
+    TensorF64_B = TensorFactory((K, N), F64)
+    TensorF64_C = TensorFactory((M, N), F64)
+    test(TensorF64_A, TensorF64_B, TensorF64_C)
+
+    MemRefF64_A = MemRef[F64, M, K]
+    MemRefF64_B = MemRef[F64, K, N]
+    MemRefF64_C = MemRef[F64, M, N]
+    test(MemRefF64_A, MemRefF64_B, MemRefF64_C)
+
+
+def test_batch_matmul():
+    batch = 2
+    M, K, N = 3, 4, 5
+
+    def test(typA: type, typB: type, typC: type) -> None:
+        @compile()
+        def f(A: typA, B: typB, init: typC) -> typC:
+            # A: [batch, M, K]
+            # B: [batch, K, N]
+            return linalg.batch_matmul(A, B, init=init)
+
+        A = multi_arange((batch, M, K), np.float64)
+        B = multi_arange((batch, K, N), np.float64)
+        C = multi_arange((batch, M, N), np.float64)
+
+        expect = np.matmul(A, B) + C
+
+        rst = f(A.copy(), B.copy(), C)
+
+        assert np.allclose(rst, expect)
+        assert np.allclose(C, expect)
+
+    TensorF64_A = TensorFactory((batch, M, K), F64)
+    TensorF64_B = TensorFactory((batch, K, N), F64)
+    TensorF64_C = TensorFactory((batch, M, N), F64)
+    test(TensorF64_A, TensorF64_B, TensorF64_C)
+
+    MemRefF64_A = MemRef[F64, batch, M, K]
+    MemRefF64_B = MemRef[F64, batch, K, N]
+    MemRefF64_C = MemRef[F64, batch, M, N]
+    test(MemRefF64_A, MemRefF64_B, MemRefF64_C)
+
+
 if __name__ == "__main__":
     run(test_linalg_exp)
     run(test_linalg_log)
@@ -490,3 +555,5 @@ if __name__ == "__main__":
     run(test_broadcast)
     run(test_broadcast_multi_type)
     run(test_broadcast_bad_shapes)
+    run(test_matmul)
+    run(test_batch_matmul)
