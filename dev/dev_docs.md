@@ -151,6 +151,13 @@ future instead).
 In the future, it might be a good idea to enable (at least part of) the linter
 in CI: see https://github.com/Huawei-CPLLab/PyDSL/issues/43.
 
+The current formatter is not always strict about line-width of comments and
+docstrings.
+Thus, you should make your IDE display the max line-width used by the project
+(specified in `pyproject.toml`, currently 79).
+In VS Code, this can be done by adding `"editor.rulers": [79],` to
+`settings.json`.
+
 # Pull requests
 
 - You can make draft pull requests if you want someone to look at your code and
