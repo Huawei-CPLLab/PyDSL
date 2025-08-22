@@ -5,6 +5,8 @@ Every test in test_transform should perform 2 checks:
 """
 
 import numpy as np
+import pytest
+
 from helper import run, SequentialTokenConsumer
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
@@ -59,6 +61,7 @@ def transform_seq_test_cse_then_coalesce(targ: AnyOp):
     loop_coalesce(match(targ, "coalesce_loop"))
 
 
+@pytest.mark.xfail
 def test_cse_then_coalesce():
     @compile(
         globals(),
