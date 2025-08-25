@@ -78,9 +78,50 @@ def test_const_if():
     assert n1[0] == 123
 
 
+def test_fold():
+    @compile()
+    def func1() -> Bool:
+        a: Bool = False
+        if True:
+            a = True
+        else:
+            a = False
+        return a
+
+    assert "scf.if" not in func1.emit_mlir()
+    assert func1()
+
+    @compile()
+    def func2() -> Bool:
+        a: Bool = True
+        if True:
+            a = False
+        else:
+            a = 3
+        return a
+
+    assert "scf.if" not in func2.emit_mlir()
+    assert not func2()
+
+    @compile()
+    def func3() -> Bool:
+        return 3 if False else False
+
+    assert "scf.if" not in func3.emit_mlir()
+    assert not func3()
+
+    @compile()
+    def func4() -> Bool:
+        return True if True else False
+
+    assert "scf.if" not in func4.emit_mlir()
+    assert func4()
+
+
 if __name__ == "__main__":
     run(test_range_basic)
     run(test_range_implicit_type)
     run(test_if)
     run(test_if_else)
     run(test_const_if)
+    run(test_fold)
