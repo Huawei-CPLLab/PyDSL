@@ -107,6 +107,16 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         """
         ...
 
+    def apply_decorators(
+        self: typing.Self, visitor: ToMLIRBase, node: ast.FunctionDef
+    ) -> None:
+        """
+        Applies decorators to compiled mlir function.
+        """
+        for nme in reversed(node.decorator_list):
+            dec = visitor.visit(nme)
+            dec(self)
+
     @abstractmethod
     def _get_new_vars(self) -> dict[str, SubtreeOut]:
         """
@@ -154,6 +164,7 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
     ) -> "Function":
         f = cls.node_to_header(visitor, node)
         f.init_val_body(visitor, node)
+        f.apply_decorators(visitor, node)
         return f
 
     @classmethod
