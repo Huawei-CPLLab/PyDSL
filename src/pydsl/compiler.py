@@ -7,7 +7,7 @@ from functools import cache, reduce
 from pathlib import Path
 from typing import Any
 
-from mlir.dialects import arith, func, scf
+from mlir.dialects import arith, func
 import mlir.ir as mlirir
 from mlir.ir import (
     Context,
@@ -41,10 +41,12 @@ from pydsl.protocols import (
     handle_CompileTimeCallable,
     lower_single,
 )
+from pydsl import scf
 from pydsl.scope import ScopeStack
 from pydsl.type import Index, Number, iscompiled
 from pydsl.type import Slice as DSlice
 from pydsl.type import Tuple as DTuple
+from pydsl.type import Poison
 
 
 # FIXME: turn these into proper passes that return a dict
@@ -242,6 +244,13 @@ class ToMLIR(ToMLIRBase):
     @cache
     def visit(self, node: ast.AST | Lowerable) -> SubtreeOut:
         try:
+            # Poison value must not be read
+            match node:
+                case ast.Name(id=id, ctx=ast.Load()):
+                    val = self.scope_stack.resolve_name(id)
+                    if isinstance(val, Poison):
+                        raise val._exc
+
             match node:
                 case ast.AST():
                     visitation = super().visit(node)
@@ -736,8 +745,6 @@ class ToMLIR(ToMLIRBase):
             # Case for when something that can be evaluated is passed as the
             # test
             case ast.If(test=test, body=body, orelse=orelse):
-                has_else = len(orelse) != 0
-
                 test = self.visit(test)
                 if not isinstance(test, CompileTimeTestable):
                     raise TypeError(
@@ -756,24 +763,7 @@ class ToMLIR(ToMLIRBase):
 
                     return
 
-                if_exp = scf.IfOp(
-                    lower_single(test.Bool()),
-                    [],  # results are empty for now
-                    hasElse=has_else,
-                )
-
-                with InsertionPoint(if_exp.then_block):
-                    for b in body:
-                        self.visit(b)
-                    scf.YieldOp([])
-
-                if has_else:
-                    with InsertionPoint(if_exp.else_block):
-                        for b in orelse:
-                            self.visit(b)
-                        scf.YieldOp([])
-
-                return if_exp
+                return scf.IfOp(self, node)
 
             case _:
                 raise SyntaxError("unexpected form in if statement")
