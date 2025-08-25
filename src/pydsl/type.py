@@ -1364,3 +1364,35 @@ class Slice:
         step = Index(1) if self.step is None else self.step
         size = hi.op_sub(lo).op_ceildiv(step)
         return (lo, size, step)
+
+
+class Poison:
+    """
+    A poison value whose existence per se isn't bad, but it must not be read.
+    A poison is constructed with an exception that will be raised
+    if the value is read.
+    """
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def _raise(self):
+        raise self._exc
+
+    # Prevent lowering into MLIR
+    def lower(self, *_, **__):
+        self._raise()
+
+    @classmethod
+    def lower_class(cls, *_, **__):
+        raise TypeError("Cannot lower a Poison type")
+
+    # Catch any Python operator use (mimic Number, Int, etc.)
+    def __getattr__(self, _):
+        self._raise()
+
+    def __call__(self, *_, **__):
+        self._raise()
+
+    def __repr__(self) -> str:
+        return f"Poison({self._exc!r})"

@@ -2,30 +2,62 @@ import ast
 import typing
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import reduce
 from typing import Any
 
 
-class Scope:
-    f_locals: dict[str, Any] = {}
-    bound = set()
+class BindingContext:
+    """
+    A binding context that represents blocks in if branches, for body, etc.
+    """
 
-    def __init__(
-        self, scoping_obj: Any, f_locals: dict[str, Any], bound: set[str]
-    ) -> None:
-        self.scoping_obj = scoping_obj
+    context_obj: ast.AST
+    f_locals: dict[str, Any]
+
+    def __init__(self, context_obj: ast.AST, f_locals: dict[str, Any]) -> None:
+        self.context_obj = context_obj
         self.f_locals = f_locals
-        self.bound = bound
-
-    def init_global(f_locals) -> "Scope":
-        return Scope("<module>", f_locals, set())
 
     def assign_name(self, name, value) -> None:
         self.f_locals[name] = value
 
 
+class Scope:
+    stack: list[BindingContext]
+    scoping_obj: Any
+    bound: set[str]
+
+    def __init__(
+        self, scoping_obj: Any, f_locals: dict[str, Any], bound: set[str]
+    ) -> None:
+        self.stack = [BindingContext(scoping_obj, f_locals)]
+        self.scoping_obj = scoping_obj
+        self.bound = bound
+
+    @property
+    def f_locals(self) -> dict[str, Any]:
+        return reduce(lambda acc, d: {**acc, **d.f_locals}, self.stack, {})
+
+    def init_global(f_locals) -> "Scope":
+        return Scope("<module>", f_locals, set())
+
+    def assign_name(self, name, value) -> None:
+        self.stack[-1].assign_name(name, value)
+
+    @contextmanager
+    def new_binding_context(
+        self, binding_context: BindingContext
+    ) -> Iterator[None]:
+        self.stack.append(binding_context)
+        try:
+            yield
+        finally:
+            self.stack.pop()
+
+
 class ScopeStack:
-    stack: list[Scope] = []
-    global_scope: Scope = None
+    stack: list[Scope]
+    global_scope: Scope
 
     def __init__(self, f_locals) -> None:
         self.global_scope = Scope.init_global(f_locals)
@@ -174,5 +206,15 @@ class ScopeStack:
         self.stack.append(scope)
         try:
             yield
+        finally:
+            self.stack.pop()
+
+    @contextmanager
+    def new_binding_context(
+        self, binding_context: BindingContext
+    ) -> Iterator[None]:
+        try:
+            with self.stack[-1].new_binding_context(binding_context):
+                yield
         finally:
             self.stack.pop()
