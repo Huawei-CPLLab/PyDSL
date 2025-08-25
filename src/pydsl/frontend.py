@@ -1517,3 +1517,103 @@ def compile(
         return cm
 
     return payload
+
+
+class Template:
+    """
+    A class which supports compilation using type parameters
+    provided by the user. It works by deferring compilation until
+    type parameters are known.
+
+    This class holds a python function and all the information required
+    to compile it when the type arguments are known.
+
+    When subscripted with type arguments, the function is compiled with
+    the parameters substituted for the type arguments in the context.
+    """
+
+    _f: Callable
+    _tparams: list[ast.TypeVar]
+    _context: typing.Optional[dict[str, Any]]
+    _settings: dict
+
+    def __init__(
+        self,
+        f: Callable,
+        tparams: list[ast.TypeVar],
+        context: typing.Optional[dict[str, Any]],
+        settings: dict,
+    ):
+        self._f = f
+        self._tparams = tparams
+        self._context = context
+        self._settings = settings
+
+    @cache
+    def __call__(self, *args, **kwargs):
+        if self._tparams:
+            raise NotImplementedError(
+                "type inference for templates not yet implemented"
+            )
+
+        return compile(self._context, **self._settings)(self._f)(
+            *args, **kwargs
+        )
+
+    @cache
+    def __getitem__(self, template_args):
+        if not isinstance(template_args, tuple):
+            template_args = (template_args,)
+
+        if len(template_args) != len(self._tparams):
+            raise TypeError("incorrect number of template arguments")
+
+        for ta, tp in zip(template_args, self._tparams):
+            self._context[tp.name] = ta
+
+        return compile(self._context, **self._settings)(self._f)
+
+
+def template(context: typing.Optional[dict[str, Any]] = None, **settings):
+    """
+    A decorator which supports generic functions with type parameters.
+
+    This decorator can be used instead of @compile on a PyDSL function,
+    and it will allow the function to take template parameters in square
+    brackets. Any arguments passed to the decorator itself will be
+    forwarded to @compile.
+
+    The general syntax is as follows:
+    ```
+    @template(...) # same arguments are compile
+    def my_func[T, ...](a: T, ...): # T, ... is a list of template parameters
+        ... # do stuff
+
+    my_func[SInt32, ...](3, ...) # compilation occurs here
+    ```
+
+    For example
+    @template()
+    def my_func[T](a: T) -> T:
+        return a
+
+    my_func[SInt32](3) # returns 3
+    my_func[F32](3.5) # return 3.5
+    """
+    if context is None:
+        f_back = inspect.currentframe().f_back
+        context = f_back.f_builtins | f_back.f_globals | f_back.f_locals
+
+    def payload(f: Callable) -> CompiledFunction:
+        func_ast: AST = ast.parse(textwrap.dedent(inspect.getsource(f)))
+
+        assert isinstance(func_ast, ast.Module)
+        func_ast = func_ast.body[0]
+        if not isinstance(func_ast, ast.FunctionDef):
+            raise NotImplementedError(
+                "right now, templates only support functions, not classes"
+            )
+
+        return Template(f, func_ast.type_params, context, settings)
+
+    return payload
