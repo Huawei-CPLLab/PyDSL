@@ -239,7 +239,6 @@ class ToMLIR(ToMLIRBase):
     # MLIR programs being generated multiple times
     # ast.NodeVisitor cannot modify the tree it is visiting, so cache will
     # never be outdated
-    @cache
     def visit(self, node: ast.AST | Lowerable) -> SubtreeOut:
         try:
             match node:
