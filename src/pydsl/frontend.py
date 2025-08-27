@@ -477,18 +477,15 @@ class CTarget(CompilationTarget):
     def log_command_result(self, cmds, result) -> None:
         if result.stderr:
             warning(
-                f"""The following error is caused by this command:
-
+                f"""The following warning/error is caused by this command:
 {self.cmds_to_str(cmds)}
-
-Depending on the severity of the message,
-compilation may fail entirely.
 {"*" * 20}
-{result.stderr.decode("utf-8")}{"*" * 20}"""
+{result.stderr.decode("utf-8")}{"*" * 20}
+"""
             )
         else:
             info(
-                f"""The following command was ran without issue
+                f"""The following command ran without issues:
 {self.cmds_to_str(cmds)}
 """
             )
@@ -496,12 +493,12 @@ compilation may fail entirely.
     def run_and_get_output(self, cmds):
         result = subprocess.run(
             self.cmds_to_str(cmds),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             shell=True,
             check=False,
         )
         self.log_command_result(cmds, result)
+        result.check_returncode()
         return result.stdout.decode("utf-8") if result.stdout else None
 
     def run_and_pipe_output(self, cmds, stdout: IO):
@@ -513,6 +510,7 @@ compilation may fail entirely.
             check=False,
         )
         self.log_command_result(cmds, result)
+        result.check_returncode()
         return result.stdout.decode("utf-8") if result.stdout else None
 
     def check_cmd(self, cmd: str) -> None:
