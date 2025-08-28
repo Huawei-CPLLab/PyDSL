@@ -31,7 +31,8 @@ from mlir.ir import (
 )
 
 from pydsl.macro import CallMacro, MethodType, Uncompiled
-from pydsl.protocols import ToMLIRBase, ArgContainer
+from pydsl.protocols import ArgContainer, canonicalize_args, ToMLIRBase
+from pydsl.protocols import ArgContainer, canonicalize_args, ToMLIRBase
 
 if TYPE_CHECKING:
     # This is for imports for type hinting purposes only and which can result
@@ -1214,6 +1215,7 @@ class Tuple(typing.Generic[*DTypes]):
     value: tuple
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
         dtypes: tuple[type], name=_default_subclass_name

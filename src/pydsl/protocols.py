@@ -1,9 +1,11 @@
 import ast
 import typing
 import numpy as np
+
 from ast import NodeVisitor
 from collections.abc import Callable, Iterable
 from functools import reduce
+from inspect import signature
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -451,3 +453,39 @@ class ArgContainer:
                 )
 
         return result
+
+
+def canonicalize_args(f: Callable) -> Callable:
+    """
+    Binds each argument to the corresponding parameter, applies default
+    arguments, then calls f. This is useful in combination with
+    functools.cache:
+
+    ```
+    @canonicalize_args
+    @cache
+    def f(a, b):
+        print(a, b)
+
+
+    f(1, 2)
+    f(1, 2)
+    f(1, b=2)
+    f(b=2, a=1)
+    ```
+
+    Without canonicalize_args, the above code will print 3 times, but with
+    canonicalize_args, it will only print once.
+
+    This should be used when it's very important that calling the function with
+    the same arguments twice causes it to only run once and return the exact
+    same object. If @cache is used just for optimization, then
+    canonicalize_args is not necessary.
+    """
+
+    def payload(*args, **kwargs):
+        bound_args = signature(f).bind(*args, **kwargs)
+        bound_args.apply_defaults()
+        return f(*bound_args.args, **bound_args.kwargs)
+
+    return payload

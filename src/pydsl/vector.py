@@ -6,7 +6,12 @@ import mlir.ir as mlir
 from mlir.ir import OpView, Value, VectorType
 
 from pydsl.type import Lowerable
-from pydsl.protocols import lower_single, SubtreeOut, ToMLIRBase
+from pydsl.protocols import (
+    canonicalize_args,
+    lower_single,
+    SubtreeOut,
+    ToMLIRBase,
+)
 
 
 class Vector:
@@ -32,6 +37,7 @@ class Vector:
     ]
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
         shape: tuple[int], element_type, *, name=_default_subclass_name

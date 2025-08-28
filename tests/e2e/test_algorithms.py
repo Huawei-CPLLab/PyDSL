@@ -11,6 +11,7 @@ from pydsl.frontend import compile
 from pydsl.func import InlineFunction
 import pydsl.linalg as linalg
 from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
+import pydsl.tensor as tensor
 from pydsl.tensor import Tensor
 from pydsl.scf import range
 from pydsl.transform import (
@@ -22,7 +23,7 @@ from pydsl.transform import (
     tile,
 )
 from pydsl.transform import match_tag as match
-from pydsl.type import F32, F64, AnyOp, Index, Tuple
+from pydsl.type import AnyOp, F32, F64, Index, Number, Tuple
 from helper import multi_arange, run
 
 MemRefRank2F32 = MemRefFactory((DYNAMIC, DYNAMIC), F32)
@@ -333,6 +334,9 @@ def test_softmax():
     N = 64
     M = 2048
     neg_inf = -math.inf
+    # TODO: remove once we support constexprs better
+    N_num = Number(N)
+    M_num = Number(M)
 
     @InlineFunction.generate()
     def _add(a, b) -> Any:
@@ -340,17 +344,17 @@ def test_softmax():
 
     @compile()
     def softmax_memref(arr: MemRef[F64, N, M]) -> MemRef[F64, N, M]:
-        reduce_res = alloca(MemRef[F64, N])
-        linalg.fill(neg_inf, reduce_res)
+        reduce_res = alloca((N_num,), F64)
+        linalg.fill(reduce_res, neg_inf)
         linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
 
-        mx = alloca(MemRef[F64, N, M])
+        mx = alloca((N_num, M_num), F64)
         linalg.broadcast(reduce_res, out=mx, dims=[1])
         linalg.sub(arr, mx, out=arr)
 
         linalg.exp(arr)
 
-        linalg.fill(0, reduce_res)
+        linalg.fill(reduce_res, 0)
         linalg.reduce(_add, arr, init=reduce_res, dims=[1])
 
         sm = mx  # Reuse buffer
@@ -359,20 +363,16 @@ def test_softmax():
 
         return arr
 
-    # TODO: reduce_res should be allocated with tensor.empty, but tensor.empty
-    # is not really functional right now
     @compile()
-    def softmax_tensor(
-        arr: Tensor[F64, N, M], reduce_res: Tensor[F64, N]
-    ) -> Tensor[F64, N, M]:
-        reduce_res = linalg.fill(neg_inf, reduce_res)
+    def softmax_tensor(arr: Tensor[F64, N, M]) -> Tensor[F64, N, M]:
+        reduce_res = tensor.full((N_num,), neg_inf, F64)
         reduce_res = linalg.reduce(arith.max, arr, init=reduce_res, dims=[1])
         mx = linalg.broadcast(reduce_res, out=arr, dims=[1])
 
         arr = linalg.sub(arr, mx, out=arr)
         arr = linalg.exp(arr)
 
-        reduce_res = linalg.fill(0, reduce_res)
+        reduce_res = linalg.fill(reduce_res, 0)
         reduce_res = linalg.reduce(_add, arr, init=reduce_res, dims=[1])
         sm = linalg.broadcast(reduce_res, out=arr, dims=[1])
 
@@ -386,7 +386,7 @@ def test_softmax():
     memref_res = softmax_memref(arr.copy())
     assert np.allclose(memref_res, cor_res)
 
-    tensor_res = softmax_tensor(arr.copy(), np.empty(N, dtype=np.float64))
+    tensor_res = softmax_tensor(arr.copy())
     assert np.allclose(tensor_res, cor_res)
 
 

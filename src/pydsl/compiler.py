@@ -28,6 +28,7 @@ from pydsl.func import Function, TransformSequence
 # E.g. CalMacro implements the CompileTimeCallable protocol.
 # E.g. Addition in Int and Float uses the op_add magic function.
 from pydsl.protocols import (
+    canonicalize_args,
     CompileTimeClassSliceable,
     CompileTimeIterable,
     CompileTimeSliceable,
@@ -912,6 +913,7 @@ class Dialect:
     # despite being initialized twice.
     # Whereas not doing caching would result in False as they would be
     # two different objects both with name == "arith".
+    @canonicalize_args
     @cache
     def __new__(cls, *args, **kwargs):
         return super(Dialect, cls).__new__(cls)
