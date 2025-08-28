@@ -6,8 +6,9 @@ import weakref
 
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
+from pydsl.gpu import GPU_AddrSpace
 import pydsl.linalg as linalg
-from pydsl.memref import alloc, alloca, DYNAMIC, Dynamic, MemRef, MemRefFactory
+from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory
 from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
@@ -100,7 +101,7 @@ def test_return_tuple_memref():
 def test_alloca_scalar():
     @compile()
     def f() -> UInt32:
-        m_scalar = alloca(MemRef[UInt32, 1])
+        m_scalar = alloca((1,), UInt32)
 
         for i in arange(10):
             m_scalar[0] = i
@@ -113,7 +114,7 @@ def test_alloca_scalar():
 def test_alloca_dynamic():
     @compile()
     def f(a: Index, b: Index) -> Tuple[UInt32, UInt32]:
-        m = alloca(MemRef[UInt32, Dynamic, 2, Dynamic], (a, b))
+        m = alloca((a, 2, b), UInt32)
 
         m[0, 0, 0] = 1
         m[a - 1, 1, b - 1] = 2
@@ -127,62 +128,69 @@ def test_alloca_dynamic():
 def test_alloc_scalar():
     @compile()
     def f() -> MemRef[UInt32, 1]:
-        m_scalar = alloc(MemRef[UInt32, 1])
+        m_scalar = alloc((1,), UInt32)
         m_scalar[0] = 1
         return m_scalar
 
     assert (f() == np.asarray([1], dtype=np.uint32)).all()
 
 
-def test_alloc_wrong_dynamic_sizes():
+def test_dealloc():
+    """
+    Doesn't really test whether the memref is deallocated, since that's hard
+    to test, but does test that the syntax of dealloc works.
+    """
+
+    @compile()
+    def f() -> SInt16:
+        m = alloc((3, Index(7)), SInt16)
+        m[1, 2] = 5
+        res = m[1, 2]
+        dealloc(m)
+        return res
+
+    assert f() == 5
+
+    mlir = f.emit_mlir()
+    assert r"memref.dealloc" in mlir
+
+
+def test_alloc_memory_space():
+    """
+    We can't use GPU address spaces on CPU, so just test if it compiles and
+    the MLIR is reasonable.
+    """
+
+    @compile(auto_build=False)
+    def f():
+        m = alloc((4, 2), F32, memory_space=GPU_AddrSpace.Global)
+        dealloc(m)
+
+    mlir = f.emit_mlir()
+    assert r"memref<4x2xf32, #gpu.address_space<global>>" in mlir
+
+
+def test_alloc_align():
+    @compile()
+    def f() -> MemRef[F64, 4, 6]:
+        return alloc((4, 6), F64, alignment=12345)
+
+    n1 = f()
+    assert n1.ctypes.data % 12345 == 0
+
+
+def test_alloc_bad_align():
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f():
+            alloc((4, 6), F64, alignment="xyz")
+
     with compilation_failed_from(ValueError):
-        # 2 dynamic dimensions, 1 specified
-        @compile()
-        def f1(a: Index):
-            m1 = alloc(MemRef[F32, 4, 5, DYNAMIC, DYNAMIC], (a,))
-
-    with compilation_failed_from(ValueError):
-        # 1 dynamic dimension, 3 specified
-        @compile()
-        def f2(a: Index, b: Index, c: Index):
-            m1 = alloc(MemRef[UInt32, DYNAMIC, 8], (a, b, c))
-
-    with compilation_failed_from(ValueError):
-        # 0 dynamic dimensins, 2 specified
-        @compile()
-        def f3(a: Index, b: Index):
-            m1 = alloc(MemRef[SInt16, 4, 4], (a, b))
-
-    with compilation_failed_from(ValueError):
-        # 1 dynamic dimension, 0 specified
-        @compile()
-        def f4():
-            m1 = alloc(MemRef[F64, DYNAMIC])
-
-
-def test_alloca_strided():
-    # TODO: currently, it seems we cannot lower alloc/alloca
-    # calls that use memrefs of non-trivial layouts from MLIR -> LLVMIR.
-    # The code for generating the MLIR from Python exists (but cannot be tested).
-    # If we find the right MLIR pass for this lowering, we should make
-    # this code compile and add more tests that check alloc/alloca of
-    # strided MemRefs (e.g. dynamic strides, invalid dynamic_symbols etc.).
-
-    with compilation_failed_from(NotImplementedError):
-        MemRefStrided = MemRefFactory((2, 3), SInt16, strides=(4, 7))
 
         @compile()
-        def f() -> Tuple[SInt16, SInt16, SInt16]:
-            m1 = alloca(MemRefStrided)
-            m1[0, 0] = 5
-            m1[0, 1] = 8
-            m1[0, 2] = 40
-            m1[1, 0] = 3
-            m1[1, 1] = 5
-            m1[1, 2] = -12
-            return m1[0, 1], m1[0, 2], m1[1, 2]
-
-        assert f() == (8, 40, -12)
+        def f():
+            alloc((4, 6), F64, alignment=-123)
 
 
 def test_load_strided():
@@ -459,8 +467,10 @@ if __name__ == "__main__":
     run(test_alloca_scalar)
     run(test_alloca_dynamic)
     run(test_alloc_scalar)
-    run(test_alloc_wrong_dynamic_sizes)
-    run(test_alloca_strided)
+    run(test_alloc_align)
+    run(test_alloc_bad_align)
+    run(test_dealloc)
+    run(test_alloc_memory_space)
     run(test_load_strided)
     run(test_load_strided_big)
     run(test_load_strided_wrong)

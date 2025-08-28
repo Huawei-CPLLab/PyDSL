@@ -292,11 +292,11 @@ def test_elemwise_bin_wrong_shape():
 def test_linalg_fill():
     @compile()
     def fill_tensor(x: F32, t1: Tensor[F64, 10, 20]) -> Tensor[F64, 10, 20]:
-        return linalg.fill(x, t1)
+        return linalg.fill(t1, x)
 
     @compile()
     def fill_memref(x: SInt32, m1: MemRef[SInt32, 100]) -> MemRef[SInt32, 100]:
-        return linalg.fill(x, m1)
+        return linalg.fill(m1, x)
 
     # Check return value for tensor
     n1 = multi_arange((10, 20), np.float64)
@@ -385,7 +385,7 @@ def test_reduce_non_commutative():
 
     @compile()
     def f(arr: MemRef[UInt8, 4, 4]) -> UInt64:
-        out = alloca(MemRef[UInt64])
+        out = alloca((), UInt64)
         linalg.reduce(combine, arr, init=out, dims=[0, 1])
         return out[()]
 
