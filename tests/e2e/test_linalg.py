@@ -3,7 +3,7 @@ import typing
 
 from collections.abc import Iterable
 import pydsl.arith as arith
-from pydsl.frontend import compile
+from pydsl.frontend import compile, template
 from pydsl.func import InlineFunction
 from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
 from pydsl.tensor import Tensor, TensorFactory
@@ -460,6 +460,129 @@ def test_broadcast_bad_shapes():
             linalg.broadcast(arr, out=out, dims=[0])
 
 
+def test_matmul():
+    @template()
+    def f[TA, TB, TC](A: TA, B: TB, init: TC) -> TC:
+        return linalg.matmul(A, B, init=init)
+
+    def test(
+        dimsA: tuple[int], dimsB: tuple[int], dimsC: tuple[int], good: bool
+    ):
+        A = multi_arange(dimsA, np.int64)
+        B = multi_arange(dimsB, np.int64)
+        C = multi_arange(dimsC, np.int64)
+
+        TensorTA = TensorFactory(dimsA, SInt64)
+        TensorTB = TensorFactory(dimsB, SInt64)
+        TensorTC = TensorFactory(dimsC, SInt64)
+        TensorTD = TensorFactory((DYNAMIC, DYNAMIC), SInt64)
+
+        MemRefTA = MemRefFactory(dimsA, SInt64)
+        MemRefTB = MemRefFactory(dimsB, SInt64)
+        MemRefTC = MemRefFactory(dimsC, SInt64)
+
+        if good:
+            cor_res = A @ B + C
+
+            # For Tensor, check return value only
+            assert (
+                f[TensorTA, TensorTB, TensorTC](A.copy(), B.copy(), C.copy())
+                == cor_res
+            ).all()
+            assert (
+                f[TensorTD, TensorTD, TensorTD](A.copy(), B.copy(), C.copy())
+                == cor_res
+            ).all()
+            assert (
+                f[TensorTA, TensorTD, TensorTD](A.copy(), B.copy(), C.copy())
+                == cor_res
+            ).all()
+
+            # For MemRef, check that out is modfied as well
+            act_res = f[MemRefTA, MemRefTB, MemRefTC](A, B, C)
+            assert (act_res == cor_res).all()
+            assert (C == cor_res).all()
+        else:
+            with compilation_failed_from(TypeError):
+                f[TensorTA, TensorTB, TensorTC](A.copy(), B.copy(), C.copy())
+
+            with compilation_failed_from(TypeError):
+                f[MemRefTA, MemRefTB, MemRefTC](A, B, C)
+
+    test((3, 4), (4, 5), (3, 5), True)
+    test((3, 5), (4, 5), (3, 5), False)
+
+
+def test_matmul_no_init():
+    # TODO support this
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f(A: Tensor[F64, 1, 1], B: Tensor[F64, 1, 1]) -> Tensor[F64, 1, 1]:
+            return linalg.matmul(A, B)
+
+
+def test_batch_matmul():
+    @template()
+    def f[TA, TB, TC](A: TA, B: TB, init: TC) -> TC:
+        return linalg.batch_matmul(A, B, init=init)
+
+    def test(
+        dimsA: tuple[int], dimsB: tuple[int], dimsC: tuple[int], good: bool
+    ):
+        A = multi_arange(dimsA, np.int64)
+        B = multi_arange(dimsB, np.int64)
+        C = multi_arange(dimsC, np.int64)
+
+        TensorTA = TensorFactory(dimsA, SInt64)
+        TensorTB = TensorFactory(dimsB, SInt64)
+        TensorTC = TensorFactory(dimsC, SInt64)
+        TensorTD = TensorFactory((DYNAMIC, DYNAMIC, DYNAMIC), SInt64)
+
+        MemRefTA = MemRefFactory(dimsA, SInt64)
+        MemRefTB = MemRefFactory(dimsB, SInt64)
+        MemRefTC = MemRefFactory(dimsC, SInt64)
+
+        if good:
+            cor_res = A @ B + C
+
+            # For Tensor, check return value only
+            assert (
+                f[TensorTA, TensorTB, TensorTC](A.copy(), B.copy(), C.copy())
+                == cor_res
+            ).all()
+            assert (
+                f[TensorTD, TensorTD, TensorTD](A.copy(), B.copy(), C.copy())
+                == cor_res
+            ).all()
+
+            # For MemRef, check that out is modfied as well
+            act_res = f[MemRefTA, MemRefTB, MemRefTC](A.copy(), B.copy(), C)
+            assert (act_res == cor_res).all()
+            assert (C == cor_res).all()
+        else:
+            f[TensorTA, TensorTB, TensorTC](A.copy(), B.copy(), C.copy())
+
+    test((2, 3, 4), (2, 4, 5), (2, 3, 5), True)
+
+    with compilation_failed_from(TypeError):
+        test((2, 3, 5), (2, 4, 5), (2, 3, 5), False)
+
+    with compilation_failed_from(TypeError):
+        test((2, 3, 4), (3, 4, 5), (2, 3, 5), False)
+
+
+def test_batch_matmul_no_init():
+    # TODO support this
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f(
+            A: Tensor[F64, 1, 1, 1], B: Tensor[F64, 1, 1, 1]
+        ) -> Tensor[F64, 1, 1, 1]:
+            return linalg.batch_matmul(A, B)
+
+
 if __name__ == "__main__":
     run(test_linalg_exp)
     run(test_linalg_log)
@@ -490,3 +613,7 @@ if __name__ == "__main__":
     run(test_broadcast)
     run(test_broadcast_multi_type)
     run(test_broadcast_bad_shapes)
+    run(test_matmul)
+    run(test_matmul_no_init)
+    run(test_batch_matmul)
+    run(test_batch_matmul_no_init)
