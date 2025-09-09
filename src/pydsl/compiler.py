@@ -71,8 +71,11 @@ class Source:
     embeded: bool
     filepath: typing.Optional[Path] = None
     embedee_filepath: typing.Optional[Path] = None
+    lineno: typing.Optional[int] = None
 
-    def init_embeded(src_str: str, filepath: Path, src_ast=None) -> "Source":
+    def init_embeded(
+        src_str: str, filepath: Path, src_ast=None, lineno=None
+    ) -> "Source":
         src_ast = src_ast if src_ast is not None else ast.parse(src_str)
         return Source(
             src_str,
@@ -80,9 +83,12 @@ class Source:
             embeded=True,
             filepath=None,
             embedee_filepath=filepath,
+            lineno=lineno,
         )
 
-    def init_file(src_str: str, filepath: Path, src_ast=None) -> "Source":
+    def init_file(
+        src_str: str, filepath: Path, src_ast=None, lineno=None
+    ) -> "Source":
         src_ast = src_ast if src_ast is not None else ast.parse(src_str)
         return Source(
             src_str,
@@ -90,6 +96,7 @@ class Source:
             embeded=False,
             filepath=filepath,
             embedee_filepath=None,
+            lineno=lineno,
         )
 
     @property
@@ -168,15 +175,16 @@ class CompilationError(Exception):
             else ""
         )
 
+        base_lineno = 0
         if self.src is not None:
             file_descriptor = f"{self.src.path}"
-            if self.src.embeded:
-                file_descriptor = f"<embed in {file_descriptor}>"
+            if self.src.lineno is not None:
+                base_lineno = self.src.lineno
         else:
             file_descriptor = "<unknown>"
 
         if hasattr(self.node, "lineno"):
-            line_descriptor = str(self.node.lineno)
+            line_descriptor = str(self.node.lineno + base_lineno)
         else:
             line_descriptor = "<unknown>"
 
