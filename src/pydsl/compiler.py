@@ -227,6 +227,7 @@ class ToMLIR(ToMLIRBase):
     context_stack = []
     catch_comp_error: bool = True
     module: mlirir.Module = None
+    skip_next: bool = False
     triton_funcs: dict[
         str, dict[tuple[str, ...], func.FuncOp]
     ] = {}  # stores all triton functions
@@ -240,8 +241,10 @@ class ToMLIR(ToMLIRBase):
     # MLIR programs being generated multiple times
     # ast.NodeVisitor cannot modify the tree it is visiting, so cache will
     # never be outdated
-    @cache
     def visit(self, node: ast.AST | Lowerable) -> SubtreeOut:
+        if self.skip_next:
+            self.skip_next = False
+            return
         try:
             match node:
                 case ast.AST():
@@ -339,9 +342,11 @@ class ToMLIR(ToMLIRBase):
             case ast.Call():
                 # adds the AST as the first parameter, similar to
                 # how self works in Python
-                return handle_CompileTimeCallable(
+                rst = handle_CompileTimeCallable(
                     self, value, prefix_args=(operand,)
                 )
+                self.skip_next = True
+                return rst
 
             case _:
                 raise TypeError(
