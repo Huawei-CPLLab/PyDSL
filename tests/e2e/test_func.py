@@ -489,7 +489,6 @@ def test_inline_func_pos_as_kw_only():
             return inline_f(x, y)
 
 
-@pytest.mark.xfail(reason="https://github.com/Huawei-CPLLab/PyDSL/issues/93")
 def test_inline_func_scope_good():
     c = 56
 
