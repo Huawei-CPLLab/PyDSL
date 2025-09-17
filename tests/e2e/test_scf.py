@@ -2,16 +2,16 @@ import numpy as np
 
 from pydsl.frontend import compile
 from pydsl.memref import MemRefFactory
-from pydsl.type import Index, UInt32, Bool
+from pydsl.type import Index, F16, UInt16, UInt32, Bool, SInt32, Tuple, Any
 from pydsl.scf import range as srange
 
-from helper import run
+from helper import compilation_failed_from, run
 
 MemRefSingle = MemRefFactory((1,), UInt32)
 
 
 def test_range_basic():
-    @compile(globals(), dump_mlir=True)
+    @compile(globals())
     def f(n: Index, m: MemRefSingle):
         c1: Index = 1
         c2: Index = 2
@@ -118,10 +118,150 @@ def test_fold():
     assert func4()
 
 
+def test_if_local_type_match():
+    @compile()
+    def f(b: Bool) -> UInt32:
+        a: UInt32 = 2
+        if b:
+            a: UInt32 = 1
+
+        return a
+
+    assert f(True) == 1
+    assert f(False) == 2
+
+
+def test_if_local_type_mismatch_poison_not_read():
+    @compile()
+    def f(b: Bool):
+        a: UInt32 = 2
+        if b:
+            a: SInt32 = 1
+
+        # the type of `a` is unknown here
+
+        # shadows previous `a`, so this can compile
+        a: F16 = 3.14
+
+
+def test_if_local_type_mismatch_poison_read():
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f(b: Bool):
+            a: UInt32 = 2
+            if b:
+                a: SInt32 = 1
+
+            # the type of `a` is unknown here so this cannot compile
+            b = b + a
+
+
+def test_if_else_local_type_mismatch_poison_read():
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f(b: Bool) -> UInt32:
+            if b:
+                a: UInt16 = 1
+            else:
+                a: UInt32 = 2
+
+            return a
+
+
+def test_if_local2():
+    @compile()
+    def f(b: Bool, a: UInt32) -> UInt32:
+        if b:
+            a: UInt32 = 1
+
+        return a
+
+    assert f(True, 2) == 1
+    assert f(False, 2) == 2
+
+
+def test_if_else_local():
+    @compile()
+    def f(b: Bool) -> Tuple[SInt32, SInt32]:
+        if b:
+            a: SInt32 = 1
+            c: SInt32 = -1
+        else:
+            c: SInt32 = -2
+            a: SInt32 = 2
+
+        return a, c
+
+    assert f(True) == (1, -1)
+    assert f(False) == (2, -2)
+
+
+def test_if_else_local_nested():
+    @compile()
+    def f(b1: Bool, b2: Bool) -> Tuple[SInt32, SInt32]:
+        c: SInt32 = -4
+        if b1:
+            if b2:
+                a: SInt32 = 1
+                c: SInt32 = -1
+            else:
+                c: SInt32 = -3
+                a: SInt32 = 3
+        else:
+            a: SInt32 = 4
+            if b2:
+                a: SInt32 = 2
+                c: SInt32 = -2
+
+        return a, c
+
+    assert f(True, True) == (1, -1)
+    assert f(True, False) == (3, -3)
+    assert f(False, True) == (2, -2)
+    assert f(False, False) == (4, -4)
+
+
+def test_range_yield():
+    @compile()
+    def f() -> UInt32:
+        a: UInt32 = 0
+        for i in srange(5):
+            a = a + 1
+        return a
+
+    assert f() == 5
+
+
+def test_range_type_mismatch_poison_not_read():
+    @compile()
+    def f() -> UInt32:
+        a: UInt32 = 0
+        for i in srange(5):
+            a: SInt32 = SInt32(i)
+
+        # the type of `a` is unknown here
+
+        # shadows previous `a`, so this can compile
+        a: F16 = 3.14
+
+
+def test_range_type_mismatch_poison_not_read():
+    with compilation_failed_from(TypeError):
+
+        @compile()
+        def f() -> UInt32:
+            a: UInt32 = 0
+            for i in srange(5):
+                a: UInt16 = UInt16(i)
+
+            # the type of `a` is unknown here so this cannot compile
+            return a
+
+
 if __name__ == "__main__":
-    run(test_range_basic)
-    run(test_range_implicit_type)
-    run(test_if)
-    run(test_if_else)
-    run(test_const_if)
-    run(test_fold)
+    # automatically find and run all test functions
+    for name, fn in dict(globals()).items():
+        if name.startswith("test_") and callable(fn):
+            run(fn)
