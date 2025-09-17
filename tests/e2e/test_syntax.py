@@ -1,5 +1,7 @@
+from typing import Annotated
 import numpy as np
 from pydsl.frontend import compile
+from pydsl import llvm
 from pydsl.memref import MemRef
 from pydsl.type import Index, SInt16, Tuple, UInt8, UInt16
 from helper import compilation_failed_from, run
@@ -75,6 +77,15 @@ def test_chain_assign_mixed():
     assert f(np.zeros((5,), dtype=np.int16)) == (2 + 2 + 2, 8 + 8 + 8)
 
 
+def test_attribute():
+    @compile()
+    def f(m: Annotated[MemRef[UInt8], llvm.nonnull, llvm.align(8)]):
+        pass
+
+    mlir = f.emit_mlir()
+    assert r"memref<i8> {llvm.align = 8 : i64, llvm.nonnull}" in mlir
+
+
 def test_minus_eq():
     @compile()
     def f(a: SInt16) -> SInt16:
@@ -127,6 +138,7 @@ if __name__ == "__main__":
     run(test_assign_tuple)
     run(test_chain_assign)
     run(test_chain_assign_mixed)
+    run(test_attribute)
     run(test_minus_eq)
     run(test_plus_eq_memref)
     run(test_plus_eq_side_effect)

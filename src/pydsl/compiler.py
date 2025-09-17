@@ -715,6 +715,14 @@ class ToMLIR(ToMLIRBase):
             case ast.Name(id=id):
                 return self.scope_stack.resolve_name(id)
 
+            case ast.Subscript(
+                value=ast.Name(id="Annotated"),
+                slice=ast.Tuple(elts=[base_type, *metadata]),
+            ):
+                origin = self.resolve_type_annotation(base_type)
+                origin.metadata = [self.visit(m) for m in metadata]
+                return origin
+
             # A subscripted type
             case ast.Subscript(value=ast.Name(id=id), slice=slice):
                 origin = self.scope_stack.resolve_name(id)
