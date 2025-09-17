@@ -491,14 +491,20 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     get = class_factory
 
     @classmethod
-    def get_fully_dynamic(cls, element_type, rank: int):
+    def get_fully_dynamic(
+        cls, element_type, rank: int, memory_space: MemorySpace = None
+    ):
         """
         Quick alias for returning a MemRef type where shape,
         offset, and strides are all dynamic.
         """
         dyn_list = tuple([DYNAMIC] * rank)
         return cls.class_factory(
-            dyn_list, element_type, offset=DYNAMIC, strides=dyn_list
+            dyn_list,
+            element_type,
+            offset=DYNAMIC,
+            strides=dyn_list,
+            memory_space=memory_space,
         )
 
     def __init__(self, rep: OpView | Value) -> None:
@@ -591,7 +597,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         lo_list, size_list, step_list = slices_to_mlir_format(
             key_list, self.runtime_shape
         )
-        result_type = self.get_fully_dynamic(self.element_type, dim)
+        result_type = self.get_fully_dynamic(
+            self.element_type, dim, self.memory_space
+        )
         dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
         rep = memref.SubViewOp(
             result_type.lower_class()[0],

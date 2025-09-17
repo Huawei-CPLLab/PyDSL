@@ -194,6 +194,31 @@ def test_alloc_bad_align():
             alloc((4, 6), F64, alignment=-123)
 
 
+def test_slice_memory_space():
+    """
+    We can't use GPU address spaces on CPU, so just test if it compiles.
+    """
+
+    MemRefT = MemRef.get((DYNAMIC,), F32, memory_space=GPU_AddrSpace.Global)
+
+    @compile(auto_build=False)
+    def f(m: MemRefT):
+        n = m[:]
+
+    # expect the line
+    # %subview = memref.subview %arg0[%c0_0] [%1] [%c1] : ⤶
+    # memref<?xf32, #gpu.address_space<global>> to ⤶
+    # memref<?xf32, strided<[?], offset: ?>, #gpu.address_space<global>>
+    mlir = f.emit_mlir()
+    matched_lines = [
+        line
+        for line in mlir.splitlines()
+        if "memref.subview" in line
+        and line.count("#gpu.address_space<global>") >= 2
+    ]
+    assert len(matched_lines) == 1
+
+
 def test_load_strided():
     MemRefStrided = MemRefFactory((10, 5), F32, offset=123, strides=(1, 10))
 
@@ -525,6 +550,7 @@ if __name__ == "__main__":
     run(test_alloc_bad_align)
     run(test_dealloc)
     run(test_alloc_memory_space)
+    run(test_slice_memory_space)
     run(test_load_strided)
     run(test_load_strided_big)
     run(test_load_strided_wrong)
