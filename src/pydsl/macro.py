@@ -129,7 +129,10 @@ class EvaluatedArg(ArgCompiler):
                 return f
 
             def hydrated_f(*args, **kwargs):
-                return f(visitor, *args, **kwargs)
+                if f.with_callsite:
+                    return f(visitor, arg, *args, **kwargs)
+                else:
+                    return f(visitor, *args, **kwargs)
 
             return hydrated_f
 
@@ -266,8 +269,11 @@ class CallMacro(Macro):
             bound_args = signature.bind(*args, **keywords)
             binding = bound_args.arguments
         except TypeError as e:
+            chain = visitor.get_attr_chain(node.func)
+            chain.reverse()
+            name = ".".join(chain)
             raise TypeError(
-                f"couldn't bind arguments when calling a macro: {e}"
+                f"couldn't bind arguments when calling macro {name}: {e}"
             ) from e
 
         for name in binding.keys():
@@ -381,7 +387,10 @@ class CallMacro(Macro):
                             f"trying to call class only method {fn} on an instance"
                         )
 
-        prefix_args = (visitor, *prefix_args)
+        if fn.with_callsite:
+            prefix_args = (visitor, node, *prefix_args)
+        else:
+            prefix_args = (visitor, *prefix_args)
 
         bound_args = CallMacro.parse_args(
             fn.signature(), visitor, node, prefix_args=prefix_args
@@ -397,10 +406,28 @@ class CallMacro(Macro):
         CallMacro. For a normal CallMacro, this is just f. This method exists
         so that it can be overridden by AffineCallMacro.
         """
-        return f
+
+        # Since python applies decorators starting from the innermost,
+        # we must postpone evaluating @tag until @compile runs.
+        # The wrapper below checks if we are inside @compile.
+        # If not, turn the @tag into a no-op.
+        def wrapper(visitor, *args, **kwargs):
+            if isinstance(visitor, ast.NodeVisitor):
+                # if the first argument is ToMLIR/AffineExprWalk
+                # we are inside @compile
+                return f(visitor, *args, **kwargs)
+            else:
+                return lambda f: f
+
+        return wrapper
 
     @classmethod
-    def generate(cls, *, method_type: MethodType = MethodType.STATIC):
+    def generate(
+        cls,
+        *,
+        with_callsite: bool = False,
+        method_type: MethodType = MethodType.STATIC,
+    ):
         """
         Decorator that converts a function into a CallMacro.
 
@@ -410,7 +437,9 @@ class CallMacro(Macro):
         The arguments of a CallMacro are as follows:
         - The first argument passed in will always be an object of type
           ToMLIRBase, although its type-hinting is not enforced.
-        - If method_type is not STATIC, the second argument might be self or
+        - If with_callsite is True, the next argument is the ast.Call
+          representing the call of the CallMacro.
+        - If method_type is not STATIC, the next argument might be self or
           cls, see the documentation of MethodType.
         - The remaining arguments must be type-hinted Annotation[a, b], where a
           can be any type, and b must be an ArgCompiler.
@@ -424,6 +453,7 @@ class CallMacro(Macro):
                 f.__name__,
                 (cls,),
                 {
+                    "with_callsite": with_callsite,
                     "method_type": method_type,
                     "signature": staticmethod(lambda: signature(f)),
                     "__call__": staticmethod(cls.generate_call(f)),

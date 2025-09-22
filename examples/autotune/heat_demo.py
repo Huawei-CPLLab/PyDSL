@@ -1,6 +1,7 @@
 import numpy as np
 
 from pydsl.transform import (
+    decorate_next,
     fuse,
     get_loop,
     tile,
@@ -60,9 +61,9 @@ def heat_fuse_tile(
 ):
     a: F32 = 2.0
     b: F32 = 0.125
-    """@tag("tile")"""
+    decorate_next(tag("tile"))
     for _ in arange(tsteps):
-        """@tag("fuse_1")"""
+        decorate_next(tag("fuse_1"))
         for i in arange(1, n - 1):
             for j in arange(1, n - 1):
                 for k in arange(1, n - 1):
@@ -77,7 +78,7 @@ def heat_fuse_tile(
                         - a * A[i, j, k]
                         + A[i, j, k - 1]
                     )
-        """@tag("fuse_2")"""
+        decorate_next(tag("fuse_2"))
         for i in arange(1, n - 1):
             for j in arange(1, n - 1):
                 for k in arange(1, n - 1):
