@@ -15,6 +15,7 @@ import pydsl.tensor as tensor
 from pydsl.tensor import Tensor
 from pydsl.scf import range
 from pydsl.transform import (
+    decorate_next,
     fuse,
     fuse_into,
     int_attr,
@@ -48,9 +49,9 @@ def explicit_affine_heat(
 ):
     a: F32 = 2.0
     b: F32 = 0.125
-    """@tag("tile")"""
+    decorate_next(tag("tile"))
     for t in arange(S(tsteps)):
-        """@tag("fuse_1")"""
+        decorate_next(tag("fuse_1"))
         for i in arange(1, S(n) - 1):
             for j in arange(1, S(n) - 1):
                 for k in arange(1, S(n) - 1):
@@ -76,7 +77,7 @@ def explicit_affine_heat(
                         + A[am(D(i), D(j), D(k))]
                     )
 
-        """@tag("fuse_2")"""
+        decorate_next(tag("fuse_2"))
         for i in arange(1, S(n) - 1):
             for j in arange(1, S(n) - 1):
                 for k in arange(1, S(n) - 1):
@@ -116,9 +117,9 @@ def implicit_affine_heat(
 ) -> Tuple[MemRefRank3F32, MemRefRank3F32]:
     a: F32 = 2.0
     b: F32 = 0.125
-    """@tag("tile")"""
+    decorate_next(tag("tile"))
     for _ in arange(tsteps):
-        """@tag("fuse_1")"""
+        decorate_next(tag("fuse_1"))
         for i in arange(1, n - 1):
             for j in arange(1, n - 1):
                 for k in arange(1, n - 1):
@@ -134,7 +135,7 @@ def implicit_affine_heat(
                         + A[i, j, k - 1]
                     )
 
-        """@tag("fuse_2")"""
+        decorate_next(tag("fuse_2"))
         for i in arange(1, n - 1):
             for j in arange(1, n - 1):
                 for k in arange(1, n - 1):
@@ -232,20 +233,20 @@ def correlation(
 ) -> F32:
     a: F32 = 1.0
     b: F32 = 0.0
-    """@tag("tile_and_distribute")"""
+    decorate_next(tag("tile_and_distribute"))
     for arg3 in arange(S(v1) - 1):
-        """@int_attr("set", 0)"""
+        decorate_next(int_attr("set", 0))
         arg2[am(D(arg3), D(arg3))] = a
         for arg4 in arange(D(arg3) + 1, S(v1)):
-            """@int_attr("set", 1)"""
+            decorate_next(int_attr("set", 1))
             arg2[am(D(arg4), D(arg3))] = b
             for arg5 in arange(S(v0)):
-                """@recursively(lambda x: int_attr(x, "set", 2))"""
-                arg2[am(D(arg4), D(arg3))] = arg2[am(D(arg4), D(arg3))] + (
-                    arg1[am(D(arg5), D(arg3))] * arg1[am(D(arg5), D(arg4))]
-                )
+                with recursively(int_attr("set", 2)):
+                    arg2[am(D(arg4), D(arg3))] = arg2[am(D(arg4), D(arg3))] + (
+                        arg1[am(D(arg5), D(arg3))] * arg1[am(D(arg5), D(arg4))]
+                    )
 
-            with recursively(lambda x: int_attr(x, "set", 3)):
+            with recursively(int_attr("set", 3)):
                 arg2[am(D(arg3), D(arg4))] = arg2[am(D(arg4), D(arg3))]
 
     arg1[am(S(v1) - 1, S(v1) - 1)] = a
@@ -278,29 +279,29 @@ def lu_transform_seq(targ: AnyOp):
 
 
 def lu(v0: Index, arg1: MemRefRank2F64):
-    """@tag("tile")"""
+    decorate_next(tag("tile"))
     for arg2 in arange(S(v0)):
-        """@tag("fuse_4")"""
+        decorate_next(tag("fuse_4"))
         for arg3 in arange(D(arg2)):
-            """@tag("fuse_1")"""
+            decorate_next(tag("fuse_1"))
             for arg4 in arange(D(arg3)):
                 arg1[am(D(arg2), D(arg3))] = arg1[am(D(arg2), D(arg3))] - (
                     arg1[am(D(arg2), D(arg4))] * arg1[am(D(arg4), D(arg3))]
                 )
 
-            """@tag("fuse_target1")"""
+            decorate_next(tag("fuse_target1"))
             v1 = arg1[am(D(arg3), D(arg3))]
 
-            """@tag("fuse_target2")"""
+            decorate_next(tag("fuse_target2"))
             v2 = arg1[am(D(arg2), D(arg3))]
 
-            """@tag("fuse_target3")"""
+            decorate_next(tag("fuse_target3"))
             v3 = v2 / v1
 
-            """@tag("fuse_target4")"""
+            decorate_next(tag("fuse_target4"))
             arg1[am(D(arg2), D(arg3))] = v3
 
-        """@tag("fuse_3")"""
+        decorate_next(tag("fuse_3"))
         for arg3 in arange(D(arg2), S(v0)):
             for arg4 in arange(D(arg2)):
                 arg1[am(D(arg2), D(arg3))] = arg1[am(D(arg2), D(arg3))] - (

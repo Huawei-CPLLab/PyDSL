@@ -1,7 +1,7 @@
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import CTarget, compile
 from pydsl.memref import DYNAMIC, MemRef
-from pydsl.transform import tile, match_tag as match, tag
+from pydsl.transform import decorate_next, tile, match_tag as match, tag
 from pydsl.type import F32, AnyOp, Index
 from helper import failed_from, run
 
@@ -33,7 +33,7 @@ from helper import failed_from, run
 #             u2: MemRef[F32, DYNAMIC],
 #             v2: MemRef[F32, DYNAMIC],
 #         ) -> None:
-#             """@tag("tile1")"""
+#             decorate_next(tag("tile1"))
 #             for i in arange(n):
 #                 for j in arange(n):
 #                     A[i, j] = A[i, j] + u1[i] * v1[j] + u2[i] * v2[j]
