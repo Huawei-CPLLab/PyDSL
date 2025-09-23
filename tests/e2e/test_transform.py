@@ -12,6 +12,7 @@ from pydsl.memref import MemRef
 from pydsl.scf import range as srange
 from pydsl.transform import (
     cse,
+    decorate_next,
     int_attr,
     loop_coalesce,
     outline_loop,
@@ -25,7 +26,7 @@ from pydsl.type import F32, AnyOp, UInt32
 def test_multiple_recursively_tag():
     @compile(globals())
     def identity():
-        with recursively(lambda x: tag(x, "mytag")):
+        with recursively(tag("mytag")):
             a: F32 = 0.0
             b: F32 = 1.0
 
@@ -41,7 +42,7 @@ def test_multiple_recursively_tag():
 def test_multiple_recursively_int_attr():
     @compile(globals())
     def identity():
-        with recursively(lambda x: int_attr(x, "myintattr", 3)):
+        with recursively(int_attr("myintattr", 3)):
             a: F32 = 0.0
             b: F32 = 1.0
 
@@ -66,10 +67,9 @@ def test_cse_then_coalesce():
         override_fields=False,
     )
     class Module:
-        """@tag("coalesce_func")"""
-
+        @tag("coalesce_func")
         def f(m: MemRef[UInt32, 4, 4]):
-            """@tag("coalesce_loop")"""
+            decorate_next(tag("coalesce_loop"))
             for i in srange(4):
                 for j in srange(4):
                     m[i, j] = i + j
@@ -104,7 +104,7 @@ def test_outline_loop():
     def f(m: MemRef[UInt32, 4, 4]):
         m[1, 1] = 3
 
-        """@tag("outlined")"""
+        decorate_next(tag("outlined"))
         for i in arange(4):
             for j in arange(4):
                 m[i, j] = i + j
