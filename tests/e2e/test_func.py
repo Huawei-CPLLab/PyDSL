@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 from typing import Any, TypeAlias, TypeVar
 
 from pydsl.frontend import compile
@@ -254,7 +253,7 @@ def test_body_func():
     @compile(body_func="my_body_func")
     class CallTest:
         def my_body_func():
-            a = 12
+            a = 12  # noqa: F841
 
         def f1() -> UInt16:
             return f2()
@@ -401,9 +400,9 @@ def test_inline_func_multiple_returns():
     @InlineFunction.generate()
     def inline_f3(a, b) -> Any:
         if Bool(True):
-            c = 0
+            c = 0  # noqa: F841
         else:
-            d = 1
+            d = 1  # noqa: F841
 
         return a + b
 
@@ -500,7 +499,7 @@ def test_inline_func_scope_good():
     @compile()
     def f(a: UInt32, b: UInt32) -> Tuple[UInt32, UInt32]:
         res1 = inline_f(a, b)
-        c = 987
+        c = 987  # noqa: F841
         res2 = inline_f(a, b)
         return res1, res2
 
@@ -542,8 +541,8 @@ def test_inline_func_unbound_local():
     # well-designed language
     @InlineFunction.generate()
     def inline_f(a, b) -> Any:
-        d = a + b + c
-        c = 1
+        d = a + b + c  # noqa: F823
+        c = 1  # noqa: F841
         return d * 3
 
     with compilation_failed_from(UnboundLocalError):

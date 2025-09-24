@@ -1,3 +1,5 @@
+# ruff: noqa # PR#85
+
 from collections.abc import Callable, Iterable
 
 import mlir.dialects.linalg as mlir_linalg

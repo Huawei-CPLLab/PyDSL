@@ -1,3 +1,4 @@
+import importlib
 import shutil
 import subprocess
 import glob
@@ -6,13 +7,11 @@ from helper import run
 
 import pytest
 
-try:
-    import triton
-    import triton.language as tl
-
-    has_triton = shutil.which("triton-adapter-opt") is not None
-except ImportError:
-    has_triton = False
+has_triton = (
+    importlib.util.find_spec("triton") is not None
+    and importlib.util.find_spec("triton.language") is not None
+    and shutil.which("triton-adapter-opt") is not None
+)
 
 # === Gather all example scripts ===
 all_examples = glob.glob("examples/**/*.py", recursive=True)
@@ -50,7 +49,9 @@ def test_example_runs(example: str) -> None:
 
 
 def make_runner(example):
-    f = lambda: test_example_runs(example)
+    def f():
+        return test_example_runs(example)
+
     f.__name__ = f"test {example}"
     return f
 

@@ -297,7 +297,7 @@ def empty(
 
 
 # This is not at the top of the file to avoid circular import
-import pydsl.linalg as linalg
+import pydsl.linalg as linalg  # noqa: E402
 
 
 @InlineFunction.generate()

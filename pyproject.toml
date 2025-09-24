@@ -46,5 +46,12 @@ quote-style = "double"
 
 [tool.ruff.lint]
 preview = true
-extend-select = ["C901"]
-ignore = ["T201", "N803", "N812", "PYI030", "F401"]
+ignore = [
+  "E741",     # Checks for the use of the characters 'l', 'O', or 'I' as variable names.
+              # just use a better font..
+  "F541",     # f-strings without placeholders are used for consistent
+              # formatting across multiple lines
+  "F821",     # Undefined name
+              # see issue https://github.com/Huawei-CPLLab/PyDSL/issues/35
+              # also @InlineFunction.generate(vars={"c": 56, "d": 78})
+]
