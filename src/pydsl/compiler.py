@@ -13,6 +13,7 @@ from mlir.ir import (
     Context,
     InsertionPoint,
     Location,
+    MLIRError,
     UnitAttr,
 )
 
