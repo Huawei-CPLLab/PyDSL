@@ -2,6 +2,7 @@ import ast
 import ctypes
 import dataclasses
 import inspect
+from inspect import BoundArguments
 import logging
 import re
 import subprocess
@@ -762,8 +763,30 @@ class CTarget(CompilationTarget):
             self.ll_to_so,
         ])(file)
 
+    def parse_args(self, signature, *args, **kwargs) -> BoundArguments:
+        """
+        Try to bind arguments, apply defaults, and type cast. Arguments should
+        already be compiled to PyDSL types by this point.
+        """
+        params = signature.parameters
+
+        try:
+            # Associate each argument value passed into the call with
+            # the parameter of the function
+            bound_args = signature.bind(*args, **kwargs)
+            binding = bound_args.arguments
+        except TypeError as e:
+            raise TypeError(
+                f"couldn't bind arguments when calling an inline function: {e}"
+            ) from e
+
+        # Apply defaults for unfilled arguments
+        bound_args.apply_defaults()
+
+        return bound_args
+
     # TODO: this function is too large. Should break it down a bit
-    def call_function(self, fname: str, *args) -> Any:
+    def call_function(self, fname: str, *args, **kwargs) -> Any:
         if not hasattr(self, "_so"):
             raise RuntimeError(
                 f"function {fname} is called before it is compiled"
@@ -772,22 +795,26 @@ class CTarget(CompilationTarget):
         f = self.get_func(fname)
         sig = f.signature
         so_f = self.load_function(f)
-        if not len(sig.parameters) == len(args):
+        if not len(sig.parameters) == len(args) + len(kwargs):
             raise TypeError(
-                f"{f.name} takes {len(sig.parameters)} positional "
+                f"{f.name} takes {len(sig.parameters)} "
                 f"argument{"s" if len(sig.parameters) > 1 else ""} "
-                f"but {len(args)} were given"
+                f"but {len(args) + len(kwargs)} were given"
             )
 
         arg_cont = ArgContainer()
+
+        bound_args = self.parse_args(sig, *args, **kwargs)
 
         mapped_args_ct = [
             (
                 ct,
                 self.val_to_CType(arg_cont, sig.parameters[key].annotation, a),
             )
-            for ct, key, a in zip(
-                self.get_args_ctypes(f), sig.parameters, args, strict=False
+            for ct, (key, a) in zip(
+                self.get_args_ctypes(f),
+                bound_args.arguments.items(),
+                strict=False,
             )
         ]
 
@@ -1324,8 +1351,8 @@ class CompiledObject(typing.Generic[ObjectType], ABC):
 
 
 class CompiledFunction(CompiledObject[Callable[..., Any]]):
-    def __call__(self, *args) -> Any:
-        return self._target.call_function(self._o.__name__, *args)
+    def __call__(self, *args, **kwargs) -> Any:
+        return self._target.call_function(self._o.__name__, *args, **kwargs)
 
 
 class CompiledClass(CompiledObject[type]):
@@ -1416,8 +1443,8 @@ class CompiledClass(CompiledObject[type]):
 
         if name in _target.funcs():
 
-            def make_call(*args) -> Any:
-                return _target.call_function(name, *args)
+            def make_call(*args, **kwargs) -> Any:
+                return _target.call_function(name, *args, **kwargs)
 
             return make_call
 

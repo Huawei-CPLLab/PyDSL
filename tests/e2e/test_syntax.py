@@ -130,6 +130,55 @@ def test_plus_eq_side_effect():
     assert (m1 == expected).all()
 
 
+def test_pos_only_args():
+    @compile()
+    def positional_only(
+        a: UInt8, /, b: UInt8, c: UInt8
+    ) -> Tuple[UInt8, UInt8, UInt8]:
+        return a, b, c
+
+    assert positional_only(2, c=4, b=3) == (2, 3, 4)
+
+
+def test_kw_only_args():
+    @compile()
+    def keyword_only(
+        a: UInt8, *, b: UInt8, c: UInt8
+    ) -> Tuple[UInt8, UInt8, UInt8]:
+        return a, b, c
+
+    assert keyword_only(2, c=4, b=3) == (2, 3, 4)
+
+
+def test_pos_or_kw_args():
+    @compile()
+    def pos_or_kw(a: UInt8, b: UInt8, c: UInt8) -> Tuple[UInt8, UInt8, UInt8]:
+        return a, b, c
+
+    assert pos_or_kw(2, c=4, b=3) == (2, 3, 4)
+
+
+def test_fun_args():
+    @compile()
+    class Mod:
+        def pos_or_kw(
+            a: UInt8, b: UInt8, c: UInt8
+        ) -> Tuple[UInt8, UInt8, UInt8]:
+            return a, b, c
+
+        def keyword_only(
+            a: UInt8, *, b: UInt8, c: UInt8
+        ) -> Tuple[UInt8, UInt8, UInt8]:
+            return pos_or_kw(a, c=c, b=b)
+
+        def positional_only(
+            a: UInt8, /, b: UInt8, c: UInt8
+        ) -> Tuple[UInt8, UInt8, UInt8]:
+            return keyword_only(2, c=4, b=3)
+
+    assert Mod.positional_only(2, c=4, b=3) == (2, 3, 4)
+
+
 if __name__ == "__main__":
     run(test_annassign)
     run(test_illegal_annassign)
@@ -142,3 +191,6 @@ if __name__ == "__main__":
     run(test_minus_eq)
     run(test_plus_eq_memref)
     run(test_plus_eq_side_effect)
+    run(test_pos_only_args)
+    run(test_kw_only_args)
+    run(test_pos_or_kw_args)
