@@ -14,9 +14,10 @@ from typing import Any
 import mlir.dialects.func as func
 import mlir.dialects.transform as transform
 import mlir.ir as mlir
-from mlir.ir import FunctionType, InsertionPoint, StringAttr, Value
+from mlir.ir import DictAttr, FunctionType, InsertionPoint, StringAttr, Value
 
 from pydsl.analysis.names import BoundAnalysis, UsedAnalysis
+from pydsl.type import lower_single
 from pydsl.protocols import (
     Lowerable,
     SubtreeOut,
@@ -534,6 +535,22 @@ class Function(FunctionLike):
                 )
 
         self.val.add_entry_block()
+        arg_attrs = []
+        for idx, (arg, (id, arg2)) in enumerate(
+            zip(
+                self.val.entry_block.arguments,
+                self.signature.parameters.items(),
+            )
+        ):
+            attributes = {}
+            if hasattr(arg2._annotation, "metadata"):
+                for attr in arg2._annotation.metadata:
+                    attributes[attr.attr_name] = lower_single(attr)
+
+            arg_attrs.append(DictAttr.get(attributes))
+
+        self.val.arg_attrs = arg_attrs
+
         with (
             InsertionPoint(self.val.entry_block),
             self._new_scope(visitor.scope_stack, node),
