@@ -110,7 +110,12 @@ class BoundAnalysis(ast.NodeVisitor):
         ba = BoundAnalysis()
 
         # names of arguments are also bound in the function
-        ba.bound.update([a.arg for a in func.args.args])
+        ba.bound.update([
+            a.arg
+            for a in func.args.args
+            + func.args.posonlyargs
+            + func.args.kwonlyargs
+        ])
 
         body = func.body if isinstance(func.body, Iterable) else [func.body]
 
