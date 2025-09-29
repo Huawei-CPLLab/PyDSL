@@ -1307,11 +1307,16 @@ class CompiledObject(typing.Generic[ObjectType], ABC):
     def filepath(self) -> Path:
         return Path(inspect.getsourcefile(self._o))
 
+    @property
+    def lineno(self) -> int:
+        return inspect.getsourcelines(self._o)[1]
+
     @cache
     def get_src(self) -> Source:
         return Source.init_embeded(
             src_str=self.src_str,
             filepath=self.filepath,
+            lineno=self.lineno,
         )
 
     def emit_mlir(self) -> str:
@@ -1431,6 +1436,7 @@ class CompiledClass(CompiledObject[type]):
             src_str=self.src_str,
             src_ast=self.src_ast,
             filepath=self.filepath,
+            lineno=self.lineno,
         )
 
     def finalize(self) -> None:
