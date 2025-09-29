@@ -189,7 +189,12 @@ def _gen_elementwise_binary_macro(
 ) -> CallMacro:
     @CallMacro.generate()
     def op_macro(
-        visitor: ToMLIRBase, x: Compiled, y: Compiled, *, out: Compiled
+        visitor: ToMLIRBase,
+        x: Compiled,
+        y: Compiled,
+        *,
+        out: Compiled,
+        do_cast: Evaluated[bool] = False,
     ) -> Tensor | MemRef:
         # This check must be done first, otherwise x.shape, y.element_type fail
         verify_memref_tensor_types(x, y, out)
@@ -200,6 +205,17 @@ def _gen_elementwise_binary_macro(
                 f"the same shape, got arguments with shapes {x.shape}, "
                 f"{y.shape}, {out.shape}"
             )
+
+        if not do_cast:
+            if not (x.element_type == y.element_type == out.element_type):
+                raise TypeError(
+                    f"linalg elementwise binary operation expects arguments "
+                    f"with the same element type, got arguments with "
+                    f"element types {x.element_type.__qualname__}, "
+                    f"{y.element_type.__qualname__}, "
+                    f"{out.element_type.__qualname__}. If you want to allow "
+                    f"automatic casting, set do_cast=True"
+                )
 
         # Get the respective fn and typefn from type_decision
         fn, typefn = type_decision(x, y, out)

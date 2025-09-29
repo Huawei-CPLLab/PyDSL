@@ -170,7 +170,7 @@ def test_linalg_sub():
         t2: Tensor[SInt32, 10, 10],
         t3: Tensor[SInt64, 10, 10],
     ) -> Tensor[SInt64, 10, 10]:
-        return linalg.sub(t1, t2, out=t3)
+        return linalg.sub(t1, t2, out=t3, do_cast=True)
 
     n1 = multi_arange((10, 10), np.int32) - 12
     n2 = multi_arange((10, 10), np.int32) + 1000
@@ -186,7 +186,7 @@ def test_linalg_mul():
         t2: MemRef[F32, 10, 10],
         t3: MemRef[SInt64, 10, 10],
     ) -> MemRef[SInt64, 10, 10]:
-        return linalg.mul(t1, t2, out=t3)
+        return linalg.mul(t1, t2, out=t3, do_cast=True)
 
     n1 = multi_arange((10, 10), np.int32) - 12
     n2 = multi_arange((10, 10), np.float32) + 1000
@@ -220,7 +220,7 @@ def test_linalg_max():
         t2: MemRef[F32, 10, 10],
         t3: MemRef[F64, 10, 10],
     ) -> MemRef[F64, 10, 10]:
-        return linalg.max(t1, t2, out=t3)
+        return linalg.max(t1, t2, out=t3, do_cast=True)
 
     n1 = multi_arange((10, 10), np.float32) / 10 - 12
     n2 = multi_arange((10, 10), np.float32) / 5 - 30
@@ -240,7 +240,7 @@ def test_linalg_min():
         t2: Tensor[UInt32, 10, 10],
         t3: Tensor[SInt32, 10, 10],
     ) -> Tensor[SInt32, 10, 10]:
-        return linalg.min(t1, t2, out=t3)
+        return linalg.min(t1, t2, out=t3, do_cast=True)
 
     n1 = multi_arange((10, 10), np.int32) - 12
     n2 = multi_arange((10, 10), np.uint32) * 2 - 30
@@ -256,7 +256,7 @@ def test_linalg_powf():
         t2: MemRef[SInt32, 10, 10],
         t3: MemRef[F32, 10, 10],
     ) -> MemRef[F32, 10, 10]:
-        return linalg.powf(t1, t2, out=t3)
+        return linalg.powf(t1, t2, out=t3, do_cast=True)
 
     n1 = multi_arange((10, 10), np.float64) / 10 - 5
     n2 = multi_arange((10, 10), np.int32) - 50
