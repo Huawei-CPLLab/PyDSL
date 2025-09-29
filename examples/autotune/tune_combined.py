@@ -6,7 +6,7 @@ from pydsl.type import Index, F16, F32, F64, AnyOp
 from pydsl.memref import MemRefFactory
 from pydsl.frontend import CTarget, PolyCTarget
 from pydsl.affine import affine_range as arange
-from pydsl.transform import tile, tag, match_tag as match
+from pydsl.transform import decorate_next, tile, tag, match_tag as match
 
 from pydsl.autotune import autotune, Var, Setting, TestingData
 
@@ -38,7 +38,7 @@ autotune_values *= TestingData([[N, A]])
 def heat_fuse_tile(n: Index, A: MemF32):
     num = Index(NUM)
     for _ in arange(num):
-        """@tag("tile")"""
+        decorate_next(tag("tile"))
         for i in arange(n):
             for j in arange(n):
                 t = DATA_TYPE(A[i, j])
