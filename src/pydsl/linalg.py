@@ -6,7 +6,7 @@ from mlir.dialects.linalg.opdsl.lang.comprehension import BinaryFn, TypeFn
 from mlir.ir import InsertionPoint
 
 from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.memref import MemRef
+from pydsl.memref import MemRef, are_dims_compatible, DYNAMIC
 from pydsl.protocols import ToMLIRBase, lower, lower_single
 from pydsl.tensor import Tensor, TensorFactory
 
@@ -240,67 +240,98 @@ powf = _gen_elementwise_binary_macro(_float_only(BinaryFn.powf))
 
 
 @CallMacro.generate()
-def batch_matmul(visitor: "ToMLIRBase", x: Compiled, y: Compiled):
-    raise NotImplementedError(
-        "batch_matmul implementation is not quite complete"
-    )
+def matmul(
+    visitor: "ToMLIRBase", x: Compiled, y: Compiled, *, init: Compiled = None
+):
+    verify_memref_tensor_types(x, y)
+    if init is not None:
+        verify_memref_tensor_types(init)
 
-    if not x.element_type == y.element_type:
-        raise Exception(
+    # TODO: if init is None, construct a zero tensor
+    if init is None:
+        raise ValueError("linalg.matmul requires an init value")
+
+    # TODO: allow different element types and casting in the future,
+    # need to raise PR in llvm-project to add `cast` parameter to MatMulOp
+    if len({x.element_type, y.element_type, init.element_type}) != 1:
+        raise TypeError(
             "operands with differing element types used in matmul"
             "linalg operation. Element types must be the same"
         )
-    if not (len(x.shape) == len(y.shape) == 3):
-        raise Exception("operands need to have rank of 3")
-    if not (x.shape[0] == y.shape[0]):
-        raise Exception("all operands need to have the same batch number")
-    if x.shape[2] != y.shape[1]:
-        raise Exception(
-            "operands need to be in batch matmul form. e.g (b,m,k)x(b,k,n) = (b,m,n)"
-        )
 
-    t = x.element_type
-
-    # TODO: what is typeFn? it is never used
-    if issubclass(t, Float):
-        typeFn = TypeFn.cast_signed
-    elif issubclass(t, Int) and t.sign == Sign.SIGNED:
-        typeFn = TypeFn.cast_signed
-    elif issubclass(t, Int) and t.sign == Sign.UNSIGNED:
-        typeFn = TypeFn.cast_unsigned
-    else:
+    if not issubclass(x.element_type, (Float, Int)):
         raise TypeError(
             f"{x.element_type.__qualname__} is not supported in this "
-            f"linalg.batch_matmul operations. Only Float and Int "
+            f"linalg.matmul operation. Only Float and Int "
             f"are supported"
         )
 
-    match x, y:
-        case Tensor(), Tensor():
-            ret_shape = [x.shape[0], x.shape[1], y.shape[2]]
-            ret_tensor = TensorFactory(tuple(ret_shape), x.element_type)
-            ret_runtime_shape = [
-                x.runtime_shape[0],
-                x.runtime_shape[1],
-                y.runtime_shape[2],
-            ]
-            ret = ret_tensor(
-                # TODO needs tensor.empty
-                build_empty_tensor(
-                    ret_runtime_shape, lower_single(x.element_type)
-                )
-            )
-            return type(ret)(
-                linalg.batch_matmul(
-                    lower_single(x), lower_single(y), outs=[lower_single(ret)]
-                )
-            )
-        # TODO: support memref operands
-        case _:
-            raise Exception(
-                f"batch_matmul operation  expected "
-                f"Tensor, got {type(x).__name__}"
-            )
+    if not (len(x.shape) == len(y.shape) == len(init.shape) == 2):
+        raise TypeError("operands and init need to have rank of 2")
+    if not (
+        are_dims_compatible(x.shape[1], y.shape[0])
+        and are_dims_compatible(x.shape[0], init.shape[0])
+        and are_dims_compatible(y.shape[1], init.shape[1])
+    ):
+        raise TypeError(
+            "operands need to be in matmul form. e.g (m,k)x(k,n) = (m,n)"
+        )
+
+    rst = mlir_linalg.matmul(
+        lower_single(x), lower_single(y), outs=[lower_single(init)]
+    )
+    if isinstance(init, Tensor):
+        return type(init)(rst)
+    else:
+        return init
+
+
+@CallMacro.generate()
+def batch_matmul(
+    visitor: "ToMLIRBase", x: Compiled, y: Compiled, *, init: Compiled = None
+):
+    verify_memref_tensor_types(x, y)
+    if init is not None:
+        verify_memref_tensor_types(init)
+
+    # TODO: if init is None, construct a zero tensor
+    if init is None:
+        raise ValueError("linalg.batch_matmul requires an init value")
+
+    # TODO: allow different element types and casting in the future,
+    # need to raise PR in llvm-project to add `cast` parameter to MatMulOp
+    if len({x.element_type, y.element_type, init.element_type}) != 1:
+        raise TypeError(
+            "operands with differing element types used in batch_matmul"
+            "linalg operation. Element types must be the same"
+        )
+
+    if not issubclass(x.element_type, (Float, Int)):
+        raise TypeError(
+            f"{x.element_type.__qualname__} is not supported in this "
+            f"linalg.batch_matmul operation. Only Float and Int "
+            f"are supported"
+        )
+
+    if not (len(x.shape) == len(y.shape) == len(init.shape) == 3):
+        raise TypeError("operands need to have rank of 3")
+    if not (
+        are_dims_compatible(x.shape[0], y.shape[0], init.shape[0])
+        and are_dims_compatible(x.shape[1], init.shape[1])
+        and are_dims_compatible(x.shape[2], y.shape[1])
+        and are_dims_compatible(y.shape[2], init.shape[2])
+    ):
+        raise TypeError(
+            "operands need to be in batch matmul form. e.g (b,m,k)x(b,k,n) = (b,m,n)"
+        )
+
+    rst = mlir_linalg.batch_matmul(
+        lower_single(x), lower_single(y), outs=[lower_single(init)]
+    )
+    if isinstance(init, Tensor):
+        return type(init)(rst)
+    else:
+        return init
 
 
 @CallMacro.generate()
