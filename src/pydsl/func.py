@@ -616,7 +616,10 @@ class Function(FunctionLike):
     ) -> SubtreeOut:
         self = attr_chain[-1]
         prefix_args = [visitor.visit(a) for a in prefix_args]
-        args = [visitor.visit(a) for a in node.args]
+        args = [
+            visitor.visit(a)
+            for a in node.args + [kw.value for kw in node.keywords]
+        ]
         args = [
             a if isinstance(a, t) else t(a) for t, a in zip(self.argst, args)
         ]
