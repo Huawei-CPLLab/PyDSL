@@ -2,12 +2,15 @@ import numpy as np
 import typing
 
 from collections.abc import Iterable
+
+import pytest
+import math
 import pydsl.arith as arith
 from pydsl.frontend import compile
 from pydsl.func import InlineFunction
 from pydsl.memref import alloca, DYNAMIC, MemRef, MemRefFactory
 from pydsl.tensor import Tensor, TensorFactory
-from pydsl.type import F32, F64, SInt32, SInt64, UInt8, UInt32, UInt64
+from pydsl.type import F32, F64, SInt8, SInt32, SInt64, UInt8, UInt32, UInt64
 import pydsl.linalg as linalg
 from helper import compilation_failed_from, multi_arange, run
 
@@ -17,114 +20,53 @@ TensorUI64 = TensorFactory((DYNAMIC,), UInt64)
 MemRefUI64 = MemRefFactory((DYNAMIC,), UInt64)
 
 
-def test_linalg_exp():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.exp(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.exp(n1))
+def make_input(scale, shift):
+    return lambda dtype: multi_arange((100,), dtype) / scale + shift
 
 
-def test_linalg_log():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.log(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 + 0.1
-    assert np.allclose(f(n1.copy()), np.log(n1))
-
-
-def test_linalg_abs():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.abs(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.abs(n1))
-
-
-def test_linalg_ceil():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.ceil(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.ceil(n1))
-
-
-def test_linalg_floor():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.floor(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.floor(n1))
-
-
-def test_linalg_negf():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.negf(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.negative(n1))
-
-
-def test_linalg_round():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.round(t1)
-
+# fmt: off
+@pytest.mark.parametrize("dtype, Type", [
+    (np.uint8, UInt8),
+    (np.uint32, UInt32),
+    (np.uint64, UInt64),
+    (np.int8, SInt8),
+    (np.int32, SInt32),
+    (np.int64, SInt64),
+    (np.float32, F32),
+    (np.float64, F64),
+])
+@pytest.mark.parametrize("Container", [Tensor, MemRef])
+@pytest.mark.parametrize("linalg_op,np_op,input_gen",[
+    (linalg.exp,    np.exp,                   make_input(10, -5)),
+    (linalg.log,    np.log,                   make_input(10, 0.1)),
+    (linalg.abs,    np.abs,                   make_input(10, -5)),
+    (linalg.ceil,   np.ceil,                  make_input(10, -5)),
+    (linalg.floor,  np.floor,                 make_input(10, -5)),
+    (linalg.negf,   np.negative,              make_input(10, -5)),
+    (linalg.round,  np.round,                 make_input(9, -5)),
     # MLIR and numpy don't round 0.5 the same way
-    n1 = multi_arange((100,), np.float64) / 9 - 5
-    assert np.allclose(f(n1.copy()), np.round(n1))
+    (linalg.sqrt,   np.sqrt,                  make_input(10, 0)),
+    (linalg.rsqrt,  lambda x: 1 / np.sqrt(x), make_input(10, 0.1)),
+    (linalg.square, np.square,                make_input(10, -5)),
+    (linalg.tanh,   np.tanh,                  make_input(10, -5)),
+    (linalg.erf,    np.vectorize(math.erf),   make_input(10, -5)),
+])
+# fmt: on
+def test_linalg_unary(linalg_op, np_op, input_gen, Container, dtype, Type):
+    def make_func():
+        @compile()
+        def f(t1: Container[Type, DYNAMIC]) -> Container[Type, DYNAMIC]:
+            return linalg_op(t1)
+        return f
+    
+    if np.issubdtype(dtype, np.integer):
+        with compilation_failed_from(TypeError):
+            make_func()
+        return
 
-
-def test_linalg_sqrt():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.sqrt(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10
-    assert np.allclose(f(n1.copy()), np.sqrt(n1))
-
-
-def test_linalg_rsqrt():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.rsqrt(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 + 0.1
-    assert np.allclose(f(n1.copy()), np.reciprocal(np.sqrt(n1)))
-
-
-def test_linalg_square():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.square(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.square(n1))
-
-
-def test_linalg_tanh():
-    @compile()
-    def f(t1: TensorF64) -> TensorF64:
-        return linalg.tanh(t1)
-
-    n1 = multi_arange((100,), np.float64) / 10 - 5
-    assert np.allclose(f(n1.copy()), np.tanh(n1))
-
-
-# Numpy doesn't have erf. Scipy is needed.
-# def test_linalg_erf():
-#     @compile()
-#     def f(t1: TensorF64) -> TensorF64:
-#         return linalg.erf(t1)
-
-#     n1 = multi_arange((100,), np.float64) / 10 - 5
-#     assert np.allclose(f(n1.copy()), np.erf(n1))
+    f = make_func()
+    n1 = input_gen(dtype)
+    assert np.allclose(f(n1.copy()), np_op(n1))
 
 
 def test_multiple_unary():
@@ -461,17 +403,6 @@ def test_broadcast_bad_shapes():
 
 
 if __name__ == "__main__":
-    run(test_linalg_exp)
-    run(test_linalg_log)
-    run(test_linalg_abs)
-    run(test_linalg_ceil)
-    run(test_linalg_floor)
-    run(test_linalg_negf)
-    run(test_linalg_round)
-    run(test_linalg_sqrt)
-    run(test_linalg_rsqrt)
-    run(test_linalg_square)
-    run(test_linalg_tanh)
     run(test_multiple_unary)
     run(test_linalg_add)
     run(test_linalg_sub)

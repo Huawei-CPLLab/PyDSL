@@ -53,6 +53,14 @@ def _gen_elementwise_unary_macro(op: DefinedOpCallable) -> CallMacro:
     def op_macro(visitor: ToMLIRBase, x: Compiled) -> Tensor | MemRef:
         verify_memref_tensor_types(x)
 
+        t = x.element_type
+        if not issubclass(t, Float):
+            raise TypeError(
+                f"this linalg elementwise unary operation only supports "
+                f"arguments with element type Float, got "
+                f"{t.__qualname__}"
+            )
+
         if isinstance(x, Tensor):
             # Return a new tensor, since tensors are SSA in MLIR
             rep = op(lower_single(x), outs=[lower_single(x)])
