@@ -11,11 +11,6 @@ import logging
 
 logging.basicConfig(level=logging.ERROR)
 
-## Getting rid of some annoying log messages
-import logging
-
-logging.basicConfig(level=logging.ERROR)
-
 N = 1000
 Af32 = np.ones((N, N), dtype=np.float32)
 Af64 = np.ones((N, N), dtype=np.float64)

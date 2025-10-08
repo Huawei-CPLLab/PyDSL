@@ -203,7 +203,7 @@ def test_slice_memory_space():
 
     @compile(auto_build=False)
     def f(m: MemRefT):
-        n = m[:]
+        n = m[:]  # noqa: F841
 
     # expect the line
     # %subview = memref.subview %arg0[%c0_0] [%1] [%c1] : ⤶

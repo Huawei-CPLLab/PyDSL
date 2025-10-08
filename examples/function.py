@@ -13,7 +13,7 @@ def function_example(a: F32, b: F32) -> F32:
 
     for i in range(l):
         e: F32 = 3.0
-        f = e + d
+        f = e + d  # noqa: F841
 
     return (a / b) + d
 

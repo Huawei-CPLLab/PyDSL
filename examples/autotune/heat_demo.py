@@ -4,9 +4,9 @@ from pydsl.transform import (
     decorate_next,
     fuse,
     get_loop,
+    tag,
     tile,
     parallel,
-    tag,
     match_tag as match,
 )
 from pydsl.type import Index, AnyOp, F32
