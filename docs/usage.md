@@ -21,7 +21,7 @@ For example, PyDSL requires all arguments of a function to be type-hinted, but t
 
 Translation between Python and PyDSL code requires minor modification.
 
-Some aspects of PyDSL's semantics deliberately stray from Python's for the purpose of aiding user productivity. For instance, a PyDSL function's return type can be optionally unhinted, but it denotates a None type (i.e. a void return) rather than an Any type. Isolated block string literals (delimited with triple quotes `"""`) are effectively comments in Python, but is also used to capture blocks of code as input to a macro in PyDSL.
+Some aspects of PyDSL's semantics deliberately stray from Python's for the purpose of aiding user productivity. For instance, a PyDSL function's return type can be optionally unhinted, but it denotates a None type (i.e. a void return) rather than an Any type.
 
 ## Limitations
 
@@ -738,12 +738,14 @@ def fn(...) -> UInt32:
 
 Transformation operators usually require operators as its arguments, such as flagging operations with `tag`. Since there is no way to do that in standard Python, PyDSL has two non-invasive syntax for doing so:
 
-**Defining with string comment**
-- By writing a string comment and begining it with `@`, the operator that comes *immediately after* the string comment will be passed into the function being defined as the first argument.
+**Defining with `decorate_next` call**
+
+* By calling `decorate_next(...)` with one or more functions, the operator that comes *immediately after* the call will be passed into those functions as the first argument.
+* Each function applies attributes to the operator.
 
 In this example, the MLIR ForOp operation that is compiled from the `for` statement is passed into the `tag` function.
 ```py
-"""@tag("tile")"""
+decorate_next(tag("tile"))
 for arg2 in arange(S(v0)): ...
 another_operation # this is not passed in
 ```
@@ -753,6 +755,15 @@ You can think of it like this (Note that this is just pseudocode. You can't actu
 for_op = compile("for arg2 in arange(S(v0)): ...")
 tag(for_op, "tile")
 ```
+
+The syntax also allows multiple arguments:
+
+```py
+decorate_next(tag("tile"), int_attr("set", 2))
+for arg2 in arange(S(v0)): ...
+```
+
+Here, both `tag("tile")` and `int_attr("set", 2)` are applied to the same `for` operator.
 
 **Defining with `with` statement**
 - You can also enclose and flag statements using Python's `with` statement, and setting its context to a transform operation. This has the benefit of allowing multiple operators to be passed into the transformation.
@@ -781,7 +792,7 @@ def affine_example(
     v1: Index,
     A: MemRefF32NM,
 ) -> F32:
-    with recursively(lambda x: tag(x, "hello")):
+    with recursively(tag("hello")):
         b: F32 = 0.0
         for i in arange(am(S(v0)), am(S(v0) + 8), 2):
             A[am(D(i), S(v1) + 5)] = b
@@ -812,40 +823,40 @@ Sometimes, you need a transform operator to be applied to every sub-operator in 
 
 For example, you can write this to apply `int_attr` to every sub-operator of the overall store statement.
 ```py
-with recursively(lambda x: int_attr(x, "set", 1)):
+with recursively(int_attr("set", 1)):
     s[j] = (s[j] + r[i]) * A[i, j]
 
-with recursively(lambda x: int_attr(x, "set", 2)):
+with recursively(int_attr("set", 2)):
     q[i] = (q[i] + p[i]) * A[i, j]
 ```
 
-The user-defined function, `lambda x: int_attr(x, "set", 1)`, is a standard Python statement that is interpreted during the compilation process (as PyDSL currently do not support lambda statements). It accepts the spliced-up MLIR operators one-by-one as `x` and tags each of them with the integer attribute `"set": 1`.
+The user-defined function, `int_attr("set", 1)`, is a standard Python statement that is interpreted during the compilation process (as PyDSL currently do not support lambda statements). It accepts the spliced-up MLIR operators one-by-one and tags each of them with the integer attribute `"set": 1`.
 
 This is equivalent to writing each sub-operator in the statement on a separate line and introducing them to `int_attr` separately. If used correctly, this macro can help avoid a lot of tedious code duplications.
 ```py
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 s_j = s[am(D(j))]
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 r_i = r[am(D(i))]
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 sum = s_j + r_i
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 A_res = A[am(D(i), D(j))]
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 mul = sum * A_res
-"""@int_attr("set", 1)"""
+decorate_next(int_attr("set", 1))
 s[am(D(j))] = mul
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 q_i = q[am(D(i))]
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 p_i = p[am(D(i))]
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 sum = q_i + p_i
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 A_res = A[am(D(i), D(j))]
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 mul = sum * A_res
-"""@int_attr("set", 2)"""
+decorate_next(int_attr("set", 2))
 q[am(D(i))] = mul
 ```
 

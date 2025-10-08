@@ -27,6 +27,7 @@ from pydsl.func import Function, TransformSequence
 # being imported explicitly.
 # E.g. CalMacro implements the CompileTimeCallable protocol.
 # E.g. Addition in Int and Float uses the op_add magic function.
+from pydsl.macro import CallMacro
 from pydsl.protocols import (
     canonicalize_args,
     CompileTimeClassSliceable,
@@ -225,9 +226,6 @@ class CompilationError(Exception):
         return f"{locator}\n{joined_line_display}\n{error_info}"
 
 
-DIRECTIVE_ESCAPE = "@"
-
-
 class ToMLIR(ToMLIRBase):
     mlir = None
     scope_stack: ScopeStack = None
@@ -329,51 +327,8 @@ class ToMLIR(ToMLIRBase):
             self, *[self.visit(entry) for entry in node.elts]
         )
 
-    def handle_directive(self, node: ast.Expr) -> SubtreeOut:
-        val = node.value.value
-
-        if (not hasattr(node, "next_line")) or (
-            operand := node.next_line
-        ) is None:
-            raise ValueError(
-                "docstring '@' directive must be placed before a valid "
-                "operator"
-            )
-
-        directive_expr = val[len(DIRECTIVE_ESCAPE) :]
-        directive_ast = ast.parse(directive_expr).body[0]
-
-        if type(directive_ast) is not ast.Expr:
-            raise ValueError("docstring '@' directive is not an expression")
-
-        match value := directive_ast.value:
-            case ast.Call():
-                # adds the AST as the first parameter, similar to
-                # how self works in Python
-                rst = handle_CompileTimeCallable(
-                    self, value, prefix_args=(operand,)
-                )
-                self.skip_next = True
-                return rst
-
-            case _:
-                raise TypeError(
-                    f"docstring '@' directive expression immediately contains "
-                    f"{type(value)}, which is not supported"
-                )
-
     def visit_Expr(self, node: ast.Expr) -> SubtreeOut:
-        DIRECTIVE_ESCAPE = "@"
-
-        expr_val = node.value
-
-        match expr_val:
-            case ast.Constant():
-                val = expr_val.value
-                if type(val) is str and val.startswith(DIRECTIVE_ESCAPE):
-                    return self.handle_directive(node)
-            case _:
-                self.visit(expr_val)
+        return self.visit(node.value)
 
     def visit_Expression(self, node: ast.Expression) -> SubtreeOut:
         # ast.Expression is output by ast.parse(mode="eval")
@@ -669,10 +624,10 @@ class ToMLIR(ToMLIRBase):
 
         A Name will simply be evaluated to its id nested in a list.
         """
-        match node.value:
+        match node:
             case ast.Attribute(attr=attrname):  # chain length > 1
                 next_node = node.value
-                return self.get_attr_chain(next_node).insert(0, attrname)
+                return [attrname] + self.get_attr_chain(next_node)
             case ast.Name(id=id):  # chain length = 1
                 return [id]
 
@@ -832,7 +787,28 @@ class ToMLIR(ToMLIRBase):
         )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> SubtreeOut:
-        return Function.full_init(self, node)
+        # skip @compile and @template
+        decorator_list = [
+            d
+            for d in node.decorator_list
+            if isinstance(
+                self.scope_stack.resolve_attr_chain(d.func)[-1], CallMacro
+            )
+            # would like to do
+            # ... in [compile, template]
+            # but
+            # from pydsl.frontend import compile, template
+            # cause cyclic error
+        ]
+        if decorator_list:
+            rst = Function.full_init(self, node)
+            return reduce(
+                lambda op, f: f(op),
+                [self.visit(decorator) for decorator in decorator_list],
+                rst,
+            )
+        else:
+            return Function.full_init(self, node)
 
     def visit_Module(self, node: ast.Module) -> SubtreeOut:
         module = Module()
