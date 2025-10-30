@@ -13,7 +13,7 @@ PyDSL has been presented at the following venues:
 - [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=iYLxgTRe8TU)
 - 2025 January PyDSL 2.0 Announcement: 🎞️[**Video**](https://youtu.be/6N7tJWSO_v4)
 - [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202025.pdf)
-- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg) Polyool Presentation (PyDSL usecase): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PolyTool%20-%20LLVM%20Conference%202025.pdf)
+- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg) PolyTool Presentation (PyDSL usecase): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PolyTool%20-%20LLVM%20Conference%202025.pdf)
 # Discord Server
 If you have any questions or would like to join the community, we have a Discord Server!
 
