@@ -1028,7 +1028,7 @@ def calc_shape(memref_shape: tuple, assoc: list[list[int]]):
         res = 1
         for i in group:
             dim = memref_shape[i]
-            if (dim == DYNAMIC or res == DYNAMIC):
+            if dim == DYNAMIC or res == DYNAMIC:
                 res = DYNAMIC
             else:
                 res *= dim
@@ -1038,20 +1038,16 @@ def calc_shape(memref_shape: tuple, assoc: list[list[int]]):
 
 
 @CallMacro.generate()
-def collapse_shape(
-    visitor: ToMLIRBase,
-    mem: Compiled,
-    assoc: Evaluated
-):
+def collapse_shape(visitor: ToMLIRBase, mem: Compiled, assoc: Evaluated):
     shpe = calc_shape(mem.shape, assoc)
     result_type = MemRef[mem.element_type, *shpe]
     return result_type(
         memref.CollapseShapeOp(
-            lower_single(result_type),
-            lower_single(mem),
-            assoc
+            lower_single(result_type), lower_single(mem), assoc
         )
     )
+
+
 def split_static_dynamic_dims(
     shape: Iterable[Number | SupportsIndex],
 ) -> tuple[list[int], list[Index]]:

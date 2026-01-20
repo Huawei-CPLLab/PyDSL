@@ -23,7 +23,7 @@ def ludcmp(
     x: MemrefF321D,
     y: MemrefF321D,
 ) -> None:
-    w = alloca(MemRef[F32, 1])
+    w = alloca((1,), F32)
     for i in arange(n):
         for j in arange(i):
             w[0] = A[i, j]
