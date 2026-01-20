@@ -6,8 +6,10 @@ import weakref
 
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import compile
+from pydsl.gpu import GPU_AddrSpace
 import pydsl.linalg as linalg
-from pydsl.memref import alloc, alloca, DYNAMIC, Dynamic, MemRef, MemRefFactory, collapse_shape
+import pydsl.memref as memref
+from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory, collapse_shape
 from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
@@ -100,7 +102,7 @@ def test_return_tuple_memref():
 def test_alloca_scalar():
     @compile()
     def f() -> UInt32:
-        m_scalar = alloca(MemRef[UInt32, 1])
+        m_scalar = alloca((1,), UInt32)
 
         for i in arange(10):
             m_scalar[0] = i
@@ -113,7 +115,7 @@ def test_alloca_scalar():
 def test_alloca_dynamic():
     @compile()
     def f(a: Index, b: Index) -> Tuple[UInt32, UInt32]:
-        m = alloca(MemRef[UInt32, Dynamic, 2, Dynamic], (a, b))
+        m = alloca((a, 2, b), UInt32)
 
         m[0, 0, 0] = 1
         m[a - 1, 1, b - 1] = 2
@@ -127,62 +129,91 @@ def test_alloca_dynamic():
 def test_alloc_scalar():
     @compile()
     def f() -> MemRef[UInt32, 1]:
-        m_scalar = alloc(MemRef[UInt32, 1])
+        m_scalar = alloc((1,), UInt32)
         m_scalar[0] = 1
         return m_scalar
 
     assert (f() == np.asarray([1], dtype=np.uint32)).all()
 
 
-def test_alloc_wrong_dynamic_sizes():
+def test_dealloc():
+    """
+    Doesn't really test whether the memref is deallocated, since that's hard
+    to test, but does test that the syntax of dealloc works.
+    """
+
+    @compile()
+    def f() -> SInt16:
+        m = alloc((3, Index(7)), SInt16)
+        m[1, 2] = 5
+        res = m[1, 2]
+        dealloc(m)
+        return res
+
+    assert f() == 5
+
+    mlir = f.emit_mlir()
+    assert r"memref.dealloc" in mlir
+
+
+def test_alloc_memory_space():
+    """
+    We can't use GPU address spaces on CPU, so just test if it compiles and
+    the MLIR is reasonable.
+    """
+
+    @compile(auto_build=False)
+    def f():
+        m = alloc((4, 2), F32, memory_space=GPU_AddrSpace.Global)
+        dealloc(m)
+
+    mlir = f.emit_mlir()
+    assert r"memref<4x2xf32, #gpu.address_space<global>>" in mlir
+
+
+def test_alloc_align():
+    @compile()
+    def f() -> MemRef[F64, 4, 6]:
+        return alloc((4, 6), F64, alignment=12345)
+
+    n1 = f()
+    assert n1.ctypes.data % 12345 == 0
+
+
+def test_alloc_bad_align():
+    with compilation_failed_from(TypeError):
+        @compile()
+        def f():
+            alloc((4, 6), F64, alignment="xyz")
+
     with compilation_failed_from(ValueError):
-        # 2 dynamic dimensions, 1 specified
         @compile()
-        def f1(a: Index):
-            m1 = alloc(MemRef[F32, 4, 5, DYNAMIC, DYNAMIC], (a,))
+        def f():
+            alloc((4, 6), F64, alignment=-123)
 
-    with compilation_failed_from(ValueError):
-        # 1 dynamic dimension, 3 specified
-        @compile()
-        def f2(a: Index, b: Index, c: Index):
-            m1 = alloc(MemRef[UInt32, DYNAMIC, 8], (a, b, c))
+def test_slice_memory_space():
+    """
+    We can't use GPU address spaces on CPU, so just test if it compiles.
+    """
 
-    with compilation_failed_from(ValueError):
-        # 0 dynamic dimensins, 2 specified
-        @compile()
-        def f3(a: Index, b: Index):
-            m1 = alloc(MemRef[SInt16, 4, 4], (a, b))
+    MemRefT = MemRef.get((DYNAMIC,), F32, memory_space=GPU_AddrSpace.Global)
 
-    with compilation_failed_from(ValueError):
-        # 1 dynamic dimension, 0 specified
-        @compile()
-        def f4():
-            m1 = alloc(MemRef[F64, DYNAMIC])
+    @compile(auto_build=False)
+    def f(m: MemRefT):
+        n = m[:]
 
-
-def test_alloca_strided():
-    # TODO: currently, it seems we cannot lower alloc/alloca
-    # calls that use memrefs of non-trivial layouts from MLIR -> LLVMIR.
-    # The code for generating the MLIR from Python exists (but cannot be tested).
-    # If we find the right MLIR pass for this lowering, we should make
-    # this code compile and add more tests that check alloc/alloca of
-    # strided MemRefs (e.g. dynamic strides, invalid dynamic_symbols etc.).
-
-    with compilation_failed_from(NotImplementedError):
-        MemRefStrided = MemRefFactory((2, 3), SInt16, strides=(4, 7))
-
-        @compile()
-        def f() -> Tuple[SInt16, SInt16, SInt16]:
-            m1 = alloca(MemRefStrided)
-            m1[0, 0] = 5
-            m1[0, 1] = 8
-            m1[0, 2] = 40
-            m1[1, 0] = 3
-            m1[1, 1] = 5
-            m1[1, 2] = -12
-            return m1[0, 1], m1[0, 2], m1[1, 2]
-
-        assert f() == (8, 40, -12)
+    # expect the line
+    # %subview = memref.subview %arg0[%c0_0] [%1] [%c1] : ⤶
+    # memref<?xf32, #gpu.address_space<global>> to ⤶
+    # memref<?xf32, strided<[?], offset: ?>, #gpu.address_space<global>>
+    mlir = f.emit_mlir()
+    matched_lines = [
+        line
+        for line in mlir.splitlines()
+        if "memref.subview" in line
+        and line.count("#gpu.address_space<global>") >= 2
+    ]
+    assert len(matched_lines) == 1
 
 
 def test_load_strided():
@@ -437,10 +468,10 @@ def test_chain_link_ndarray():
 
 def test_zero_d():
     @compile()
-    def f(t1: MemRef[UInt32]) -> Tuple[UInt32, MemRef[UInt32]]:
-        x = t1[()]
-        t1[()] = 456
-        return x, t1
+    def f(m1: MemRef[UInt32]) -> Tuple[UInt32, MemRef[UInt32]]:
+        x = m1[()]
+        m1[()] = 456
+        return x, m1
 
     n1 = np.array(123, dtype=np.uint32)
     res1, res2 = f(n1)
@@ -457,6 +488,111 @@ def test_collapse_shape():
     n1 = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
     assert all([a == b for a, b in zip(my_func(n1), [1.0, 2.0, 3.0])])
 
+def test_cast_basic():
+    @compile()
+    def f(
+        m1: MemRef[F32, 10, DYNAMIC, 30],
+    ) -> MemRef[F32, DYNAMIC, 20, DYNAMIC]:
+        m1 = m1.cast((DYNAMIC, 20, 30), strides=(600, 30, 1))
+        m1 = m1.cast((DYNAMIC, DYNAMIC, DYNAMIC))
+        m1 = m1.cast((10, 20, 30), strides=None)
+        m1 = m1.cast((DYNAMIC, 20, DYNAMIC))
+        return m1
+
+    n1 = multi_arange((10, 20, 30), dtype=np.float32)
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_strided():
+    MemRef1 = MemRef.get((8, DYNAMIC), SInt16, offset=10, strides=(1, 8))
+    MemRef2 = MemRef.get((8, 4), SInt16, offset=DYNAMIC, strides=(DYNAMIC, 8))
+
+    @compile()
+    def f(m1: MemRef1) -> MemRef2:
+        m1.cast(strides=(1, DYNAMIC))
+        m1 = m1.cast((8, 4), offset=DYNAMIC, strides=(DYNAMIC, 8))
+        return m1
+
+    i16_sz = np.int16().nbytes
+    n1 = multi_arange((8, 4), np.int16)
+    n1 = as_strided(n1, shape=(8, 4), strides=(i16_sz, 8 * i16_sz))
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_bad():
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f1(m1: MemRef[UInt32, 5, 8]):
+            m1.cast((5, 8, 7))
+
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f2(m1: MemRef[F64, DYNAMIC, 4]):
+            m1.cast((DYNAMIC, 5))
+
+    with compilation_failed_from(ValueError):
+        MemRef1 = MemRef.get((8, DYNAMIC), F32, offset=10, strides=(1, 8))
+
+        @compile()
+        def f3(m1: MemRef1):
+            m1.cast(strides=(DYNAMIC, 16))
+ 
+def test_copy_basic():
+    @compile()
+    def f(m1: MemRef[SInt16, 10, DYNAMIC], m2: MemRef[SInt16, 10, 10]):
+        memref.copy(m1, m2)
+
+    n1 = multi_arange((10, 10), np.int16)
+    n2 = np.zeros((10, 10), dtype=np.int16)
+    cor_res = n1.copy()
+    f(n1, n2)
+    assert (n2 == cor_res).all()
+
+
+def test_copy_overlap():
+    @compile()
+    def f(m1: MemRef[UInt32, 4000, 2000]):
+        memref.copy(m1[100:3000], m1[600:3500])
+        memref.copy(m1[1000:, :1900], m1[300:3300, 100:])
+
+    n1 = multi_arange((4000, 2000), dtype=np.uint32)
+    cor_res = n1.copy()
+    cor_res[600:3500] = cor_res[100:3000]
+    cor_res[300:3300, 100:] = cor_res[1000:, :1900]
+    f(n1)
+    assert (n1 == cor_res).all()
+
+
+def test_copy_strided():
+    @compile()
+    def f(m1: MemRef[F32, 10, 10], m2: MemRef[F32, 8, 9]):
+        memref.copy(m1[1::3, ::2], m2[3::2, 3:8])
+
+    n1 = multi_arange((10, 10), np.float32)
+    n2 = multi_arange((8, 9), np.float32) + 1000
+    cor_res = n2
+    cor_res[3::2, 3:8] = n1[1::3, ::2]
+    f(n1, n2)
+    assert np.allclose(n2, cor_res)
+
+
+def test_copy_bad():
+    with compilation_failed_from(ValueError):
+        # Different shapes
+        @compile()
+        def f(m1: MemRef[F32, 5], m2: MemRef[F32, 6]):
+            memref.copy(m1, m2)
+
+    with compilation_failed_from(ValueError):
+        # Different types
+        @compile()
+        def f(m1: MemRef[F32, 5], m2: MemRef[F64, 5]):
+            memref.copy(m1, m2)
+
 
 if __name__ == "__main__":
     run(test_load_implicit_index_uint32)
@@ -468,8 +604,11 @@ if __name__ == "__main__":
     run(test_alloca_scalar)
     run(test_alloca_dynamic)
     run(test_alloc_scalar)
-    run(test_alloc_wrong_dynamic_sizes)
-    run(test_alloca_strided)
+    run(test_alloc_align)
+    run(test_alloc_bad_align)
+    run(test_dealloc)
+    run(test_alloc_memory_space)
+    run(test_slice_memory_space)
     run(test_load_strided)
     run(test_load_strided_big)
     run(test_load_strided_wrong)
@@ -482,3 +621,11 @@ if __name__ == "__main__":
     run(test_chain_link_ndarray)
     run(test_zero_d)
     run(test_collapse_shape)
+    run(test_cast_basic)
+    run(test_cast_strided)
+    run(test_cast_strided)
+    run(test_cast_bad)
+    run(test_copy_basic)
+    run(test_copy_overlap)
+    run(test_copy_strided)
+    run(test_copy_bad)

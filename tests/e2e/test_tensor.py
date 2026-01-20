@@ -6,6 +6,7 @@ import weakref
 from pydsl.frontend import compile
 import pydsl.linalg as linalg
 from pydsl.memref import DYNAMIC
+import pydsl.tensor as tensor
 from pydsl.tensor import Tensor, TensorFactory
 from pydsl.type import F32, F64, Index, SInt32, Tuple, UInt64
 from helper import failed_from, compilation_failed_from, multi_arange, run
@@ -301,6 +302,77 @@ def test_zero_d():
     assert res2.shape == ()
 
 
+def test_empty():
+    @compile()
+    def f(ysz: Index) -> Tensor[SInt32, 10, DYNAMIC]:
+        t1 = tensor.empty((10, ysz), SInt32)
+        t1[1, 2] = 100
+        t1[3, 6] = 101
+        t1[9, 7] = 102
+        return t1
+
+    res = f(8)
+    assert res[1, 2] == 100
+    assert res[3, 6] == 101
+    assert res[9, 7] == 102
+
+
+def test_full():
+    @compile()
+    def f(xsz: Index) -> Tensor[UInt64, DYNAMIC, 5]:
+        t1 = tensor.full((xsz, 5), 123, UInt64)
+        return t1
+
+    test_res = f(3)
+    cor_res = np.full((3, 5), 123, dtype=np.uint64)
+    assert (test_res == cor_res).all()
+
+
+def test_zeros():
+    @compile()
+    def f() -> Tensor[F32, 10, 10]:
+        return tensor.zeros((10, 10), dtype=F32)
+
+    test_res = f()
+    cor_res = np.zeros((10, 10), dtype=np.float32)
+    assert (test_res == cor_res).all()
+
+
+def test_ones():
+    @compile()
+    def f() -> Tensor[F64, DYNAMIC, DYNAMIC]:
+        return tensor.ones((Index(6), Index(4)), dtype=F64)
+
+    test_res = f()
+    cor_res = np.ones((6, 4), dtype=np.float32)
+    assert (test_res == cor_res).all()
+
+
+def test_cast():
+    @compile()
+    def f(t1: Tensor[F32, DYNAMIC, 32, 5]) -> Tensor[F32, 64, 32, DYNAMIC]:
+        t2 = t1.cast((64, 32, DYNAMIC))
+        return t2
+
+    n1 = multi_arange((64, 32, 5), np.float32)
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_bad():
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f1(t1: Tensor[SInt32, DYNAMIC, 13]):
+            t1.cast((7, 13, DYNAMIC))
+
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f2(t1: Tensor[UInt64, 3, 7]):
+            t1.cast((1, 21))
+
+
 if __name__ == "__main__":
     run(test_wrong_dim)
     run(test_load)
@@ -321,3 +393,9 @@ if __name__ == "__main__":
     run(test_arg_copy)
     run(test_link_ndarray)
     run(test_zero_d)
+    run(test_empty)
+    run(test_full)
+    run(test_zeros)
+    run(test_ones)
+    run(test_cast)
+    run(test_cast_bad)

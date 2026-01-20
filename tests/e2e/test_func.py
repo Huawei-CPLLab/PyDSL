@@ -1,6 +1,7 @@
+import numpy as np
+import pytest
 from typing import Any, TypeAlias, TypeVar
 
-import numpy as np
 from pydsl.frontend import compile
 from pydsl.func import InlineFunction
 from pydsl.macro import CallMacro, Compiled
@@ -488,21 +489,55 @@ def test_inline_func_pos_as_kw_only():
             return inline_f(x, y)
 
 
-# In the future, we should make this NameError, but for now, this is correct
-def test_inline_func_scope():
+def test_inline_func_scope_good():
+    c = 56
+
+    @InlineFunction.generate()
+    def inline_f(a: UInt32, b: UInt32) -> UInt32:
+        d = a + b + c
+        return d * 3
+
+    @compile()
+    def f(a: UInt32, b: UInt32) -> Tuple[UInt32, UInt32]:
+        res1 = inline_f(a, b)
+        c = 987
+        res2 = inline_f(a, b)
+        return res1, res2
+
+    cor_res = (12 + 34 + 56) * 3
+    assert f(12, 34) == (cor_res, cor_res)
+
+
+def test_inline_func_scope_bad():
     @InlineFunction.generate()
     def inline_f(a, b) -> Any:
         d = a + b + c
         return d * 3
 
+    with compilation_failed_from(NameError):
+
+        @compile()
+        def f(a: UInt32, b: UInt32, c: UInt32) -> UInt32:
+            return inline_f(a, b)
+
+
+def test_inline_func_custom_scope():
+    c = 999
+
+    @InlineFunction.generate(vars={"c": 56, "d": 78})
+    def inline_f(a, b) -> Any:
+        return a + b + c + d
+
     @compile()
-    def f(a: UInt32, b: UInt32, c: UInt32) -> UInt32:
+    def f(a: UInt32, b: UInt32) -> UInt32:
         return inline_f(a, b)
 
-    assert f(12, 34, 56) == (12 + 34 + 56) * 3
+    assert f(12, 34) == 12 + 34 + 56 + 78
 
 
-def test_inline_func_unbounded_local():
+def test_inline_func_unbound_local():
+    c = 56
+
     # Yes, adding c = 1 is supposed to make this fail because Python is a
     # well-designed language
     @InlineFunction.generate()
@@ -514,7 +549,7 @@ def test_inline_func_unbounded_local():
     with compilation_failed_from(UnboundLocalError):
 
         @compile()
-        def f(a: UInt32, b: UInt32, c: UInt32) -> UInt32:
+        def f(a: UInt32, b: UInt32) -> UInt32:
             return inline_f(a, b)
 
 
@@ -556,5 +591,7 @@ if __name__ == "__main__":
     run(test_inline_func_kw_args)
     run(test_inline_func_bad_kw_arg)
     run(test_inline_func_pos_as_kw_only)
-    run(test_inline_func_scope)
-    run(test_inline_func_unbounded_local)
+    run(test_inline_func_scope_good)
+    run(test_inline_func_scope_bad)
+    run(test_inline_func_custom_scope)
+    run(test_inline_func_unbound_local)

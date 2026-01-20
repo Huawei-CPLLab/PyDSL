@@ -1,5 +1,5 @@
 import ast
-import collections.abc as cabc
+from collections.abc import Iterable
 from functools import cache
 import typing
 
@@ -7,23 +7,25 @@ from mlir.dialects import tensor
 import mlir.ir as mlir
 from mlir.ir import DenseI64ArrayAttr, OpView, RankedTensorType, Value
 
-from pydsl.macro import CallMacro, Compiled, Evaluated
+from pydsl.func import InlineFunction
+from pydsl.macro import CallMacro, Compiled, Evaluated, MethodType
 from pydsl.memref import (
+    assert_shapes_compatible,
     UsesRMRD,
     RuntimeMemrefShape,
     slices_to_mlir_format,
+    split_static_dynamic_dims,
     subtree_to_slices,
 )
+from pydsl.protocols import canonicalize_args, SubtreeOut, ToMLIRBase
 from pydsl.type import (
     Index,
     Lowerable,
-    lower,
     lower_flatten,
     lower_single,
     SupportsIndex,
     Tuple,
 )
-from pydsl.protocols import SubtreeOut, ToMLIRBase
 
 DYNAMIC = -9223372036854775808
 
@@ -42,10 +44,11 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     """
 
     value: Value
-    shape: tuple[int] = None
-    element_type: Lowerable = None
-    offset: int = None
-    strides: tuple[int] = None
+    shape: tuple[int]
+    element_type: Lowerable
+    offset: int
+    strides: tuple[int] | None
+
     _default_subclass_name = "AnnonymousTensorSubclass"
     _supported_mlir_type = [
         mlir.IntegerType,
@@ -57,9 +60,10 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
     ]
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
-        shape: tuple[int], element_type, *, name=_default_subclass_name
+        shape: Iterable[int], element_type, *, name=_default_subclass_name
     ):
         """
         Create a new subclass of Tensor dynamically with the specified
@@ -71,7 +75,7 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
         # store composite types, got {element_type} which lowers to
         # {lower(element_type)}")
 
-        if not isinstance(shape, cabc.Iterable):
+        if not isinstance(shape, Iterable):
             raise TypeError(
                 f"Tensor requires shape to be iterable, got {type(shape)}"
             )
@@ -112,9 +116,9 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
+                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
                 f"x{lower_single(self.element_type)}, got OpView with shape "
-                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
+                f"{"x".join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 
@@ -272,50 +276,80 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
         # Equivalent to cls.__class_getitem__(args)
         return cls[args]
 
+    @CallMacro.generate(method_type=MethodType.INSTANCE)
+    def cast(
+        visitor: ToMLIRBase, self: typing.Self, shape: Evaluated
+    ) -> typing.Self:
+        """
+        Convert a tensor from one type to an equivalent type without changing
+        any data elements. The resulting tensor type will have the same element
+        type. shape is the shape of the new tensor and must be known at compile
+        time. For any constant dimensions of shape, the input tensor must
+        actually have that dimension at runtime, otherwise the operation is
+        invalid.
+
+        Note: this function only returns a tensor with the updated type, it
+        does not modify the type of the input tensor.
+
+        Example:
+        ```
+        def f(t1: Tensor[F32, DYNAMIC, 32, 5]) -> Tensor[F32, 64, 32, DYNAMIC]:
+            # Only valid if the first dimension of t1 is always 64
+            t2 = t1.cast((64, 32, DYNAMIC))
+            return t2
+        ```
+        """
+
+        shape = tuple(shape)
+
+        if not all(isinstance(x, int) for x in shape):
+            raise TypeError(
+                f"shape should be a tuple of integers known at compile time ",
+                f"got {repr(shape)}",
+            )
+
+        assert_shapes_compatible(self.shape, shape)
+
+        result_type = self.class_factory(shape, self.element_type)
+        rep = tensor.cast(lower_single(result_type), lower_single(self))
+        return result_type(rep)
+
 
 # Convenient alias
 TensorFactory = Tensor.class_factory
 
 
-def verify_tensor_type(t_type: type[Tensor]):
-    if not issubclass(t_type, Tensor):
-        raise TypeError(
-            f"the type being allocated must be a subclass of Tensor, got "
-            f"{t_type}"
-        )
-
-
-def verify_dynamics_val(t_type: type[Tensor], dynamics_val: Tuple) -> None:
-    dynamics_val = lower(dynamics_val)
-
-    if not isinstance(dynamics_val, cabc.Iterable):
-        raise TypeError(f"{repr(dynamics_val)} is not iterable")
-
-    if (actual_dyn := len(dynamics_val)) != (
-        target_dyn := t_type.shape.count(DYNAMIC)
-    ):
-        raise ValueError(
-            f"Tensor has {target_dyn} dynamic dimensions to be filled, "
-            f"but emptyOp received {actual_dyn}"
-        )
-
-
 @CallMacro.generate()
 def empty(
-    visitor: ToMLIRBase, t_type: Evaluated, dynamics_val: Compiled = None
+    visitor: ToMLIRBase, shape: Compiled, dtype: Evaluated
 ) -> SubtreeOut:
-    if dynamics_val is None:
-        dynamics_val = Tuple.from_values(visitor, *())
-    verify_tensor_type(t_type)
-    verify_dynamics_val(t_type, dynamics_val)
-    dynamics_val = [lower_single(Index(i)) for i in lower(dynamics_val)]
-    idx = 0
-    orig_shape = t_type.shape
-    shape = [0] * len(orig_shape)
-    for i in range(len(orig_shape)):
-        if orig_shape[i] == DYNAMIC:
-            shape[i] = dynamics_val[idx]
-            idx += 1
-        else:
-            shape[i] = orig_shape[i]
-    return t_type(tensor.empty(shape, lower_single(t_type.element_type)))
+    if not isinstance(shape, Tuple):
+        raise TypeError(f"shape should be a Tuple, got {type(shape)}")
+
+    shape = shape.as_iterable(visitor)
+    static_shape, dynamic_sizes = split_static_dynamic_dims(shape)
+
+    t_type = TensorFactory(tuple(static_shape), dtype)
+    return t_type(
+        tensor.empty(lower_single(t_type), lower_flatten(dynamic_sizes))
+    )
+
+
+# This is not at the top of the file to avoid circular import
+import pydsl.linalg as linalg
+
+
+@InlineFunction.generate()
+def full(shape, val, dtype) -> typing.Any:
+    res = empty(shape, dtype)
+    return linalg.fill(res, val)
+
+
+@InlineFunction.generate()
+def zeros(shape, dtype) -> typing.Any:
+    return full(shape, 0, dtype)
+
+
+@InlineFunction.generate()
+def ones(shape, dtype) -> typing.Any:
+    return full(shape, 1, dtype)

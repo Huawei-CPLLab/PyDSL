@@ -1,9 +1,11 @@
 import ast
 import ctypes
 import typing
+
 from collections.abc import Callable, Iterable
 from ctypes import POINTER, c_void_p
 from dataclasses import dataclass
+from enum import Enum
 from functools import cache, reduce
 from typing import TYPE_CHECKING, Final
 
@@ -19,11 +21,17 @@ from mlir.ir import (
 )
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
-from pydsl.macro import CallMacro, Compiled, Evaluated
-from pydsl.protocols import ArgContainer, SubtreeOut, ToMLIRBase, lower
+from pydsl.macro import CallMacro, Compiled, Evaluated, MethodType
+from pydsl.protocols import (
+    ArgContainer,
+    canonicalize_args,
+    SubtreeOut,
+    ToMLIRBase,
+)
 from pydsl.type import (
     Index,
     Lowerable,
+    Number,
     Slice,
     SupportsIndex,
     Tuple,
@@ -46,6 +54,31 @@ RuntimeMemrefShape = list[int | Value]
 # based on example in PEP 646: https://peps.python.org/pep-0646/
 DType = typing.TypeVar("DType")
 Shape = typing.TypeVarTuple("Shape")
+
+
+class MemorySpace(Enum):
+    """
+    Superclass for memory spaces. Mostly used for making type-hints nicer and
+    type checking. It would probably make more sense for this to be an Enum
+    with 1 element, or an ABC, but neither of those are possible, so we use an
+    Enum with 0 elements instead.
+
+    Subclasses should implement lower to define what Attribute object in MLIR
+    they correspond to. lower_class is only defined so that this is considered
+    a Lowerable.
+    """
+
+    def lower_class(cls):
+        raise AssertionError(
+            f"class of {cls.__qualname__} cannot be lowered, only its "
+            f"instances"
+        )
+
+    def lower(self) -> tuple[mlir.Attribute | None]:
+        raise AssertionError(
+            "MemorySpace.lower should never be called, subclasses of "
+            "MemorySpace should define their own lower methods"
+        )
 
 
 @dataclass
@@ -146,6 +179,18 @@ def are_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> bool:
     return len(arr1) == len(arr2) and all(
         a == b or a == DYNAMIC or b == DYNAMIC for a, b in zip(arr1, arr2)
     )
+
+
+def assert_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> None:
+    """
+    Checks that non-dynamic dimensions of arr1 and arr2 match, throws a
+    ValueError if not.
+    """
+    if not are_shapes_compatible(arr1, arr2):
+        raise ValueError(
+            f"incompatible shapes: {repr(arr1)} and {repr(arr2)}, non-dynamic "
+            f"dimensions must be equal"
+        )
 
 
 class UsesRMRD:
@@ -365,13 +410,12 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     bytes.
     """
 
-    # Only strides is allowed to be None. If anything else remains None,
-    # something has gone wrong.
     value: Value
-    shape: tuple[int] = None
-    element_type: Lowerable = None
-    offset: int = None
-    strides: tuple[int] | None = None
+    shape: tuple[int]
+    element_type: Lowerable
+    offset: int
+    strides: tuple[int] | None
+    memory_space: MemorySpace | None
 
     _default_subclass_name = "AnnonymousMemRefSubclass"
     _supported_mlir_type = [
@@ -384,6 +428,7 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     ]
 
     @staticmethod
+    @canonicalize_args
     @cache
     def class_factory(
         shape: tuple[int],
@@ -391,7 +436,8 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         *,
         offset: int = 0,
         strides: tuple[int] | None = None,
-        name=_default_subclass_name,
+        memory_space: MemorySpace | None = None,
+        name: str = _default_subclass_name,
     ):
         """
         Create a new subclass of MemRef with the specified dimensions and type.
@@ -420,6 +466,27 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
                 f"MemRef requires shape to be iterable, got {type(shape)}"
             )
 
+        if strides is not None:
+            strides = tuple(strides)
+
+            if len(shape) != len(strides):
+                raise ValueError(
+                    f"shape and strides must have the same length, got ",
+                    f"{repr(shape)} and {repr(strides)}",
+                )
+        else:
+            if offset != 0:
+                raise ValueError(
+                    f"offset must be zero for a non-strided layout, got "
+                    f"{offset}"
+                )
+
+        if not isinstance(memory_space, (MemorySpace, type(None))):
+            raise TypeError(
+                f"MemRef memory_space must be an instance of MemorySpace or ",
+                f"None, got {type(memory_space)}",
+            )
+
         return type(
             name,
             (MemRef,),
@@ -427,7 +494,8 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
                 "shape": tuple(shape),
                 "element_type": element_type,
                 "offset": int(offset),
-                "strides": None if strides is None else tuple(strides),
+                "strides": strides,
+                "memory_space": memory_space,
             },
         )
 
@@ -435,14 +503,20 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     get = class_factory
 
     @classmethod
-    def get_fully_dynamic(cls, element_type, rank: int):
+    def get_fully_dynamic(
+        cls, element_type, rank: int, memory_space: MemorySpace = None
+    ):
         """
         Quick alias for returning a MemRef type where shape,
         offset, and strides are all dynamic.
         """
         dyn_list = tuple([DYNAMIC] * rank)
         return cls.class_factory(
-            dyn_list, element_type, offset=DYNAMIC, strides=dyn_list
+            dyn_list,
+            element_type,
+            offset=DYNAMIC,
+            strides=dyn_list,
+            memory_space=memory_space,
         )
 
     def __init__(self, rep: OpView | Value) -> None:
@@ -466,10 +540,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
-                f"x{lower_single(self.element_type)
-                    }, got representation with shape "
-                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
+                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
+                f"x{lower_single(self.element_type)}, got representation with shape "
+                f"{"x".join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 
@@ -536,7 +609,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         lo_list, size_list, step_list = slices_to_mlir_format(
             key_list, self.runtime_shape
         )
-        result_type = self.get_fully_dynamic(self.element_type, dim)
+        result_type = self.get_fully_dynamic(
+            self.element_type, dim, self.memory_space
+        )
         dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
         rep = memref.SubViewOp(
             result_type.lower_class()[0],
@@ -589,11 +664,12 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 
         if len(key_list) != dim:
             raise IndexError(
-                f"number of indices must be the same as the rank of a MemRef when storing: `"
-                f"rank is {dim}, but number of indices is {len(key_list)}"
+                f"number of indices must be the same as the rank of a MemRef "
+                f"when storing: rank is {dim}, but number of indices is "
+                f"{len(key_list)}"
             )
 
-        raise TypeError("cannot store to a slice of a MemRef")
+        raise TypeError("cannot store to a slice of a MemRef, use memref.copy")
 
     @classmethod
     def __class_getitem__(cls, args: tuple):
@@ -615,6 +691,86 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         # Equivalent to cls.__class_getitem__(args)
         return cls[args]
 
+    @CallMacro.generate(method_type=MethodType.INSTANCE)
+    def cast(
+        visitor: ToMLIRBase,
+        self: typing.Self,
+        shape: Evaluated = None,
+        *,
+        offset: Evaluated = None,
+        strides: Evaluated = (-1,),
+    ) -> typing.Self:
+        """
+        Converts a memref from one type to an equivalent type with a compatible
+        shape. The source and destination types are compatible if all of the
+        following are true:
+        - Both are ranked memref types with the same element type, address
+        space, and rank.
+        - Both have the same layout or both have compatible strided layouts.
+        - The individual sizes (resp. offset and strides in the case of strided
+        memrefs) may convert constant dimensions to dynamic dimensions and
+        vice-versa.
+
+        If the cast converts any dimensions from an unknown to a known size,
+        then it acts as an assertion that fails at runtime if the dynamic
+        dimensions disagree with the resultant destination size (i.e. it is
+        illegal to do a conversion that causes a mismatch, and it would invoke
+        undefined behaviour).
+
+        Note: a new memref with the new type is returned, the type of the
+        original memref is not modified.
+
+        Example:
+        ```
+        def f(m1: MemRef[F32, DYNAMIC, 32, 5]) -> MemRef[F32, 64, 32, DYNAMIC]:
+            # Only valid if the first dimension of m1 is always 64
+            m2 = m1.cast((64, 32, DYNAMIC))
+            return m2
+        ```
+        """
+        # NOTE: default value of strides is (-1,) because None is already used
+        # to represent default layout... This is definitely not a great
+        # solution, but it's unclear how to do this better.
+
+        shape = tuple(shape) if shape is not None else self.shape
+        offset = int(offset) if offset is not None else self.offset
+        strides = (
+            None
+            if strides is None
+            else self.strides
+            if strides == (-1,)
+            else tuple(strides)
+        )
+
+        if not all(isinstance(x, int) for x in shape):
+            raise ValueError(
+                f"shape should be a tuple of integers known at compile time ",
+                f"got {repr(shape)}",
+            )
+
+        if not (strides is None or all(isinstance(x, int) for x in strides)):
+            raise ValueError(
+                f"strides should be a tuple of integers known at compile ",
+                f"time, got {repr(strides)}",
+            )
+
+        assert_shapes_compatible(self.shape, shape)
+        assert_shapes_compatible([self.offset], [offset])
+
+        # TODO: also do a type check if one of the MemRefs is default layout.
+        # This is a reasonably complicated check, and even MLIR doesn't do it
+        # properly. E.g. mlir-opt allows
+        # `memref<3x4xf64, strided<[8, 1], offset: ?>> to memref<?x?xf64>`
+        # to compile, even though it is impossible for this to be correct.
+        if self.strides is not None and strides is not None:
+            assert_shapes_compatible(self.strides, strides)
+
+        result_type = self.class_factory(
+            shape, self.element_type, offset=offset, strides=strides
+        )
+        rep = memref.cast(lower_single(result_type), lower_single(self))
+        return result_type(rep)
+
     def lower(self) -> tuple[Value]:
         return (self.value,)
 
@@ -628,19 +784,25 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
                 e.add_note(f"hint: class name is {clsname}")
             raise e
 
-        if cls.strides is None:
-            return (
-                MemRefType.get(
-                    list(cls.shape), lower_single(cls.element_type)
-                ),
-            )
-        else:
-            layout = StridedLayoutAttr.get(cls.offset, list(cls.strides))
-            return (
-                MemRefType.get(
-                    list(cls.shape), lower_single(cls.element_type), layout
-                ),
-            )
+        layout = (
+            None
+            if cls.strides is None
+            else StridedLayoutAttr.get(cls.offset, list(cls.strides))
+        )
+        memory_space = (
+            None
+            if cls.memory_space is None
+            else lower_single(cls.memory_space)
+        )
+
+        return (
+            MemRefType.get(
+                list(cls.shape),
+                lower_single(cls.element_type),
+                layout,
+                memory_space,
+            ),
+        )
 
     @property
     def runtime_shape(self) -> RuntimeMemrefShape:
@@ -664,123 +826,124 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 MemRefFactory = MemRef.class_factory
 
 
-def verify_memory(mem: MemRef):
-    if not isinstance(mem, MemRef):
-        raise TypeError(
-            f"the type being allocated must be a subclass of MemRef, got {mem}"
-        )
-
-
-def verify_memory_type(mtype: type[MemRef]):
-    if not issubclass(mtype, MemRef):
-        raise TypeError(
-            f"the type being allocated must be a subclass of MemRef, got "
-            f"{mtype}"
-        )
-
-
-def verify_dynamic_sizes(mtype: type[MemRef], dynamic_sizes: Tuple) -> None:
-    dynamic_sizes = lower(dynamic_sizes)
-
-    # TODO: does this check do anything, since lower returns a tuple?
-    if not isinstance(dynamic_sizes, Iterable):
-        raise TypeError(f"{repr(dynamic_sizes)} is not iterable")
-
-    if (actual_dyn := len(dynamic_sizes)) != (
-        target_dyn := mtype.shape.count(DYNAMIC)
-    ):
-        raise ValueError(
-            f"MemRef has {target_dyn} dynamic dimensions to be filled, "
-            f"but alloc/alloca received {actual_dyn}"
-        )
-
-
-def verify_dynamic_symbols(
-    mtype: type[MemRef], dynamic_symbols: Tuple
-) -> None:
-    dynamic_symbols = lower(dynamic_symbols)
-
-    # TODO: does this check do anything, since lower returns a tuple?
-    if not isinstance(dynamic_symbols, Iterable):
-        raise TypeError(f"{repr(dynamic_symbols)} is not iterable")
-
-    if (actual_dyn := len(dynamic_symbols)) != (
-        target_dyn := 0
-        if mtype.strides is None
-        else mtype.strides.count(DYNAMIC)
-    ):
-        raise ValueError(
-            f"MemRef has {target_dyn} dynamic strides to be filled, "
-            f"but alloc/alloca received {actual_dyn}"
-        )
-
-
 def _alloc_generic(
     visitor: ToMLIRBase,
-    mtype: Compiled,
-    dynamic_sizes: Compiled,
-    dynamic_symbols: Compiled,
-    alloc_func: Callable[..., SubtreeOut],
+    alloc_func: Callable,
+    shape: Compiled,
+    dtype: Evaluated,
+    memory_space: MemorySpace | None = None,
+    alignment: int | None = None,
 ) -> SubtreeOut:
     """
-    Does the logic required for alloc/alloca. It was silly having
-    two functions that differed by only one character. alloc_func
-    should be memref.alloc or memref.alloca.
+    Does the logic required for alloc/alloca. It was silly having two functions
+    that differed by only one character. alloc_func should be memref.alloc or
+    memref.alloca. Currently only supports allocating non-strided MemRefs of
+    default layout.
     """
-    if dynamic_sizes is None:
-        dynamic_sizes = Tuple.from_values(visitor, *())
+    # NOTE: the dynamic_symbols parameter of memref.alloc is relevant for
+    # allocating MemRefs with an affine map layout. MLIR also supports
+    # allocating a strided MemRef, you simply change m_type to be a strided
+    # MemRef type. However, it seems we don't know how to lower such
+    # allocations from MLIR -> LLVMIR, so this feature is not implemented now.
+    # If this feature is implemented in the future, you can steal
+    # test_alloca_strided test case from an older version of test_memref.py
+    # (although that uses slightly different syntax).
 
-    if dynamic_symbols is None:
-        dynamic_symbols = Tuple.from_values(visitor, *())
-
-    verify_memory_type(mtype)
-
-    if mtype.strides is not None:
-        raise NotImplementedError(
-            "allocating MemRefs with a strided layout is currently"
-            "not supported, since there seems to be no way to lower"
-            "the resulting MLIR to LLVMIR. Allocate a MemRef with"
-            "consecutive memory instead"
+    if not isinstance(shape, Tuple):
+        raise TypeError(
+            f"shape should be a Tuple, got {type(shape).__qualname__}"
         )
 
-    verify_dynamic_sizes(mtype, dynamic_sizes)
-    verify_dynamic_symbols(mtype, dynamic_symbols)
-    dynamic_sizes = [lower_single(Index(i)) for i in lower(dynamic_sizes)]
-    dynamic_symbols = [lower_single(Index(i)) for i in lower(dynamic_symbols)]
+    if not isinstance(alignment, (int, type(None))):
+        raise TypeError(
+            f"alignment must be int or None, got {type(alignment)}"
+        )
 
-    return mtype(
-        alloc_func(lower_single(mtype), dynamic_sizes, dynamic_symbols)
+    if alignment is not None and alignment <= 0:
+        raise ValueError(f"alignment must be positive, got {alignment}")
+
+    shape = shape.as_iterable(visitor)
+    static_shape, dynamic_sizes = split_static_dynamic_dims(shape)
+
+    m_type = MemRefFactory(
+        tuple(static_shape), dtype, memory_space=memory_space
+    )
+
+    return m_type(
+        alloc_func(
+            lower_single(m_type),
+            lower_flatten(dynamic_sizes),
+            symbol_operands=[],
+            alignment=alignment,
+        )
     )
 
 
 @CallMacro.generate()
 def alloca(
     visitor: ToMLIRBase,
-    mtype: Compiled,
-    dynamic_sizes: Compiled = None,
-    dynamic_symbols: Compiled = None,
+    shape: Compiled,
+    dtype: Evaluated,
+    *,
+    memory_space: Evaluated = None,
+    alignment: Evaluated = None,
 ) -> SubtreeOut:
     return _alloc_generic(
-        visitor, mtype, dynamic_sizes, dynamic_symbols, memref.alloca
+        visitor, memref.alloca, shape, dtype, memory_space, alignment
     )
 
 
 @CallMacro.generate()
 def alloc(
     visitor: ToMLIRBase,
-    mtype: Compiled,
-    dynamic_sizes: Compiled = None,
-    dynamic_symbols: Compiled = None,
+    shape: Compiled,
+    dtype: Evaluated,
+    *,
+    memory_space: Evaluated = None,
+    alignment: Evaluated = None,
 ) -> SubtreeOut:
     return _alloc_generic(
-        visitor, mtype, dynamic_sizes, dynamic_symbols, memref.alloc
+        visitor, memref.alloc, shape, dtype, memory_space, alignment
     )
 
 
 @CallMacro.generate()
-def dealloc(visitor: ToMLIRBase, mem: Evaluated) -> None:
-    verify_memory(mem)
+def dealloc(visitor: ToMLIRBase, mem: Compiled) -> None:
+    if not isinstance(mem, MemRef):
+        raise TypeError(
+            f"the type being deallocated must be a MemRef, got {type(mem)}"
+        )
+
     return memref.dealloc(lower_single(mem))
+
+
+@CallMacro.generate()
+def copy(visitor: ToMLIRBase, src: Compiled, dst: Compiled) -> None:
+    """
+    Copies data from src to dst. src and dst must have the same shape at
+    runtime, otherwise the behaviour is undefined. src and dst do not need to
+    have the same layout.
+    """
+
+    if not (isinstance(src, MemRef) and isinstance(dst, MemRef)):
+        raise ValueError(
+            f"operands of memref.copy must be MemRefs, got {type(src)} and "
+            f"{type(dst)}"
+        )
+
+    if not are_shapes_compatible(src.shape, dst.shape):
+        raise ValueError(
+            f"operands of memref.copy must have the same shape, got "
+            f"{src.shape} and {dst.shape}"
+        )
+
+    if src.element_type != dst.element_type:
+        raise ValueError(
+            f"operands of memref.copy must have the same element type, got "
+            f"{src.element_type} and {dst.element_type}"
+        )
+
+    memref.copy(lower_single(src), lower_single(dst))
 
 
 def slices_to_mlir_format(
@@ -883,3 +1046,32 @@ def collapse_shape(
             assoc
         )
     )
+def split_static_dynamic_dims(
+    shape: Iterable[Number | SupportsIndex],
+) -> tuple[list[int], list[Index]]:
+    """
+    Given a shape with both static and dynamic dimensions, returns two lists:
+    static_shape and dynamic_sizes. static_shape is the same as shape, with all
+    dynamic dimensions replaced with the constant DYNAMIC. dynamic_sizes is a
+    list containing only the dynamic sizes, in order. Thus, it is true
+    that len(static_shape) == len(shape) and len(dynamic_dims) <= len(shape).
+    Raises a ValueError if the elements of shape are not Number or
+    SupportsIndex.
+    """
+    static_shape = []
+    dynamic_sizes = []
+
+    for s in shape:
+        match s:
+            case Number():
+                static_shape.append(int(s.value))
+            case SupportsIndex():
+                static_shape.append(DYNAMIC)
+                dynamic_sizes.append(Index(s))
+            case _:
+                raise ValueError(
+                    f"dimension size should have type Number or Index, got "
+                    f"{type(s).__qualname__}"
+                )
+
+    return static_shape, dynamic_sizes

@@ -151,6 +151,13 @@ future instead).
 In the future, it might be a good idea to enable (at least part of) the linter
 in CI: see https://github.com/Huawei-CPLLab/PyDSL/issues/43.
 
+The current formatter is not always strict about line-width of comments and
+docstrings.
+Thus, you should make your IDE display the max line-width used by the project
+(specified in `pyproject.toml`, currently 79).
+In VS Code, this can be done by adding `"editor.rulers": [79],` to
+`settings.json`.
+
 # Pull requests
 
 - You can make draft pull requests if you want someone to look at your code and
@@ -188,18 +195,21 @@ calls its `on_Call` method, but calling it from compiler code directly calls
 its  `__call__` method (which is `__init__` for a class).
 - The required arguments and the exact behaviour can thus be slightly
 different.
-    - E.g. when calling a `CallMacro` from compiler code (like from another
-    `CallMacro`), you must manually pass in `visitor` as the first argument.
+    - E.g. when calling a `CallMacro` or `InlineFunction` from compiler code
+    (like from another `CallMacro`), you must manually pass in `visitor` as the
+    first argument.
 - Sometimes calling a function-like object from compiler code and user code is
 basically the same, which is nice.
-    - The `on_Call` and `__call__` methods of `InlineFunction`s are designed
-    specifically so that calling them from user code and compiler code is the
-    same (no extra arguments need to be passed in either case).
     - Casting of scalar types works directly in both user and compiler code:
     `UInt32(UInt16(123))` is valid in both PyDSL and Python.
-        - Maybe the behaviour from casting within the compiler will become
+        - Maybe the behaviour for casting within the compiler will become
         a bit different depending on how
         https://github.com/Huawei-CPLLab/PyDSL/issues/19 is resolved.
+- When writing something similar that you want to be able to call from both
+PyDSL code and compiler code, the main way to decide what should go in
+`on_Call` and what should go in `__call__` is based on what logic needs to be
+done only when called from PyDSL, and what logic needs to be done for both
+being called from PyDSL and Python.
 
 # Circular import
 

@@ -27,7 +27,9 @@ from pydsl.func import Function, TransformSequence
 # being imported explicitly.
 # E.g. CalMacro implements the CompileTimeCallable protocol.
 # E.g. Addition in Int and Float uses the op_add magic function.
+from pydsl.macro import CallMacro
 from pydsl.protocols import (
+    canonicalize_args,
     CompileTimeClassSliceable,
     CompileTimeIterable,
     CompileTimeSliceable,
@@ -69,8 +71,11 @@ class Source:
     embeded: bool
     filepath: typing.Optional[Path] = None
     embedee_filepath: typing.Optional[Path] = None
+    lineno: typing.Optional[int] = None
 
-    def init_embeded(src_str: str, filepath: Path, src_ast=None) -> "Source":
+    def init_embeded(
+        src_str: str, filepath: Path, src_ast=None, lineno=None
+    ) -> "Source":
         src_ast = src_ast if src_ast is not None else ast.parse(src_str)
         return Source(
             src_str,
@@ -78,9 +83,12 @@ class Source:
             embeded=True,
             filepath=None,
             embedee_filepath=filepath,
+            lineno=lineno,
         )
 
-    def init_file(src_str: str, filepath: Path, src_ast=None) -> "Source":
+    def init_file(
+        src_str: str, filepath: Path, src_ast=None, lineno=None
+    ) -> "Source":
         src_ast = src_ast if src_ast is not None else ast.parse(src_str)
         return Source(
             src_str,
@@ -88,6 +96,7 @@ class Source:
             embeded=False,
             filepath=filepath,
             embedee_filepath=None,
+            lineno=lineno,
         )
 
     @property
@@ -166,15 +175,16 @@ class CompilationError(Exception):
             else ""
         )
 
+        base_lineno = 0
         if self.src is not None:
             file_descriptor = f"{self.src.path}"
-            if self.src.embeded:
-                file_descriptor = f"<embed in {file_descriptor}>"
+            if self.src.lineno is not None:
+                base_lineno = self.src.lineno
         else:
             file_descriptor = "<unknown>"
 
         if hasattr(self.node, "lineno"):
-            line_descriptor = str(self.node.lineno)
+            line_descriptor = str(self.node.lineno + base_lineno)
         else:
             line_descriptor = "<unknown>"
 
@@ -216,9 +226,6 @@ class CompilationError(Exception):
         return f"{locator}\n{joined_line_display}\n{error_info}"
 
 
-DIRECTIVE_ESCAPE = "@"
-
-
 class ToMLIR(ToMLIRBase):
     mlir = None
     scope_stack: ScopeStack = None
@@ -226,6 +233,7 @@ class ToMLIR(ToMLIRBase):
     context_stack = []
     catch_comp_error: bool = True
     module: mlirir.Module = None
+    skip_next: bool = False
     triton_funcs: dict[
         str, dict[tuple[str, ...], func.FuncOp]
     ] = {}  # stores all triton functions
@@ -239,8 +247,10 @@ class ToMLIR(ToMLIRBase):
     # MLIR programs being generated multiple times
     # ast.NodeVisitor cannot modify the tree it is visiting, so cache will
     # never be outdated
-    @cache
     def visit(self, node: ast.AST | Lowerable) -> SubtreeOut:
+        if self.skip_next:
+            self.skip_next = False
+            return
         try:
             match node:
                 case ast.AST():
@@ -317,49 +327,8 @@ class ToMLIR(ToMLIRBase):
             self, *[self.visit(entry) for entry in node.elts]
         )
 
-    def handle_directive(self, node: ast.Expr) -> SubtreeOut:
-        val = node.value.value
-
-        if (not hasattr(node, "next_line")) or (
-            operand := node.next_line
-        ) is None:
-            raise ValueError(
-                "docstring '@' directive must be placed before a valid "
-                "operator"
-            )
-
-        directive_expr = val[len(DIRECTIVE_ESCAPE) :]
-        directive_ast = ast.parse(directive_expr).body[0]
-
-        if type(directive_ast) is not ast.Expr:
-            raise ValueError("docstring '@' directive is not an expression")
-
-        match value := directive_ast.value:
-            case ast.Call():
-                # adds the AST as the first parameter, similar to
-                # how self works in Python
-                return handle_CompileTimeCallable(
-                    self, value, prefix_args=(operand,)
-                )
-
-            case _:
-                raise TypeError(
-                    f"docstring '@' directive expression immediately contains "
-                    f"{type(value)}, which is not supported"
-                )
-
     def visit_Expr(self, node: ast.Expr) -> SubtreeOut:
-        DIRECTIVE_ESCAPE = "@"
-
-        expr_val = node.value
-
-        match expr_val:
-            case ast.Constant():
-                val = expr_val.value
-                if type(val) is str and val.startswith(DIRECTIVE_ESCAPE):
-                    return self.handle_directive(node)
-            case _:
-                self.visit(expr_val)
+        return self.visit(node.value)
 
     def visit_Expression(self, node: ast.Expression) -> SubtreeOut:
         # ast.Expression is output by ast.parse(mode="eval")
@@ -378,9 +347,13 @@ class ToMLIR(ToMLIRBase):
     def visit_BinOp(self, node: ast.BinOp) -> SubtreeOut:
         left = self.visit(node.left)
         right = self.visit(node.right)
+        return self.eval_binop(left, node.op, right)
 
-        # TODO: this does not yet support the right variants
-        match node.op:
+    # TODO: this does not yet support the right variants
+    def eval_binop(
+        self, left: SubtreeOut, op: ast.operator, right: SubtreeOut
+    ) -> SubtreeOut:
+        match op:
             case ast.Add():
                 return left.op_add(right)
             case ast.Sub():
@@ -415,7 +388,7 @@ class ToMLIR(ToMLIRBase):
             # TODO: more ops can be added in the future
             case _:
                 raise SyntaxError(
-                    f"{type(node.op)} is not supported as a binary operator"
+                    f"{type(op)} is not supported as a binary operator"
                 )
 
     def visit_BoolOp(self, node: ast.BoolOp) -> SubtreeOut:
@@ -606,6 +579,30 @@ class ToMLIR(ToMLIRBase):
                     f"supported."
                 )
 
+    def visit_AugAssign(self, node: ast.AugAssign) -> SubtreeOut:
+        # make separate load/store context
+        # while ensuring the target is evaluated only once (handles side-effects safely)
+        match node.target:
+            case ast.Subscript(value=v, slice=s, ctx=_):
+                val, slc = self.visit(v), self.visit(s)
+                read_t = ast.Subscript(value=val, slice=slc, ctx=ast.Load())
+                store_t = ast.Subscript(value=val, slice=slc, ctx=ast.Store())
+            case ast.Name(id=i, ctx=_):
+                read_t = ast.Name(id=i, ctx=ast.Load())
+                store_t = ast.Name(id=i, ctx=ast.Store())
+            case other:
+                raise TypeError(
+                    f"unsupported AugAssign target: {ast.dump(other)}"
+                )
+
+        # compute new value
+        new_val = self.eval_binop(
+            self.visit(read_t), node.op, self.visit(node.value)
+        )
+        # assign back to the visited target
+        self.visit_assignment(store_t, new_val)
+        return new_val
+
     def visit_AnnAssign(self, node: ast.AnnAssign) -> SubtreeOut:
         val = self.visit(node.value)
         ret_type = self.scope_stack.resolve_name(node.annotation.id)
@@ -627,10 +624,10 @@ class ToMLIR(ToMLIRBase):
 
         A Name will simply be evaluated to its id nested in a list.
         """
-        match node.value:
+        match node:
             case ast.Attribute(attr=attrname):  # chain length > 1
                 next_node = node.value
-                return self.get_attr_chain(next_node).insert(0, attrname)
+                return [attrname] + self.get_attr_chain(next_node)
             case ast.Name(id=id):  # chain length = 1
                 return [id]
 
@@ -680,6 +677,14 @@ class ToMLIR(ToMLIRBase):
             # A single return type name
             case ast.Name(id=id):
                 return self.scope_stack.resolve_name(id)
+
+            case ast.Subscript(
+                value=ast.Name(id="Annotated"),
+                slice=ast.Tuple(elts=[base_type, *metadata]),
+            ):
+                origin = self.resolve_type_annotation(base_type)
+                origin.metadata = [self.visit(m) for m in metadata]
+                return origin
 
             # A subscripted type
             case ast.Subscript(value=ast.Name(id=id), slice=slice):
@@ -782,7 +787,28 @@ class ToMLIR(ToMLIRBase):
         )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> SubtreeOut:
-        return Function.full_init(self, node)
+        # skip @compile and @template
+        decorator_list = [
+            d
+            for d in node.decorator_list
+            if isinstance(
+                self.scope_stack.resolve_attr_chain(d.func)[-1], CallMacro
+            )
+            # would like to do
+            # ... in [compile, template]
+            # but
+            # from pydsl.frontend import compile, template
+            # cause cyclic error
+        ]
+        if decorator_list:
+            rst = Function.full_init(self, node)
+            return reduce(
+                lambda op, f: f(op),
+                [self.visit(decorator) for decorator in decorator_list],
+                rst,
+            )
+        else:
+            return Function.full_init(self, node)
 
     def visit_Module(self, node: ast.Module) -> SubtreeOut:
         module = Module()
@@ -884,6 +910,7 @@ class Dialect:
     # despite being initialized twice.
     # Whereas not doing caching would result in False as they would be
     # two different objects both with name == "arith".
+    @canonicalize_args
     @cache
     def __new__(cls, *args, **kwargs):
         return super(Dialect, cls).__new__(cls)
