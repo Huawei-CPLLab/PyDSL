@@ -362,7 +362,7 @@ Generally, the user should not need to concern with the usage of `Number` type. 
 
 # For loop
 
-For loops are performed using `pydsl.scf.range`, `pydsl.affine.affine_range`, or any subclass of `IteratorMacro`. The syntax is roughly the same as Python, except the iterator is heavily restricted to specific use cases. These iterators currently only work in for loops, and all variables that exists outside of the loop and used within the loop must be yielded.
+For loops are performed using `pydsl.scf.range`, `pydsl.affine.affine_range`, or any subclass of `IteratorMacro`. The syntax is roughly the same as Python, except the iterator is heavily restricted to specific use cases. These iterators currently only work in for loops.
 
 For both `range` and `affine_range`, the rules are the same as Python.
 - 1 argument means (exclusive end). Inclusively start at 0. Step 1.
@@ -382,30 +382,10 @@ for i in range(3, 7, 2): # this iterates 3, 5
     pass
 ```
 
-Yielding of variables outside of the loop is supported by including an optional argument `yields` in `range`. This behaves in the same way as yielding SSA names in `scf.for`. Improper yielding will lead to MLIR validation error.
-
-```py
-from pydsl.frontend import compile
-from pydsl.scf import range as srange
-from pydsl.type import Index
-
-@compile()
-def f(n: Index) -> Index:
-    acc: Index = 0
-
-    for i in srange(n, yields=[acc]):
-        acc = acc + i
-
-    return acc
-
-print(f(101))  # prints: 5050
-```
-
 # If-else statement
 
 If-else statement in PyDSL is supported by the MLIR `scf` dialect. It is currently implemented on the language level and does not make use of the macro system. While resembling Python, it is currently very restrictive in its capabilities:
 -	Return cannot be present in the if statement.
--	Variables within the if-else statement cannot be used afterwards, unless the use involves reading/writing a `MemRef`.
 
 ```py
 @compile(globals(), dump_mlir=True)
@@ -1097,22 +1077,7 @@ class range(IteratorMacro):
                     f"range expects up to 3 arguments, got {len(args)}"
                 )
 
-        for_op = scf.ForOp(start, stop, step)
-
-        assert type(iter_arg) is not ast.Tuple
-        with InsertionPoint(for_op.body):
-            # TODO: This can potentially generate improper MLIR where an
-            # unyielded variable is referenced outside of the loop. Requires
-            # dedicated analysis.
-            visitor.scope_stack.assign_name(
-                iter_arg.id, Index(for_op.induction_variable)
-            )
-
-            for n in node.body:
-                visitor.visit(n)
-
-            # TODO: nothing will be yielded for now
-            scf.YieldOp([])
+        for_op = scf.ForOp(...)
 
         return for_op
 ```
