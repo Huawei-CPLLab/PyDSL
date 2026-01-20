@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from ctypes import POINTER, c_void_p
 from dataclasses import dataclass
 from enum import Enum
-from functools import cache
+from functools import cache, reduce
 from typing import TYPE_CHECKING, Final
 
 import mlir.ir as mlir
@@ -1007,6 +1007,45 @@ def subtree_to_slices(
             raise TypeError(f"{type(key)} cannot be used as a subscript")
 
 
+def calc_shape(memref_shape: tuple, assoc: list[list[int]]):
+    # We need to make sure that assoc is valid
+    # grouping of the dimensions 0 to n-1.
+    # examples, [[0,1], [2,3], [4]]
+    # notice the order of the elements must be correct
+    flattened = [e for a in assoc for e in a]
+    assert flattened == list(range(len(flattened)))
+    assert len(flattened) == len(memref_shape)
+
+    output = []
+
+    for group in assoc:
+        res = 1
+        for i in group:
+            dim = memref_shape[i]
+            if (dim == DYNAMIC or res == DYNAMIC):
+                res = DYNAMIC
+            else:
+                res *= dim
+        output.append(res)
+
+    return tuple(output)
+
+
+@CallMacro.generate()
+def collapse_shape(
+    visitor: ToMLIRBase,
+    mem: Compiled,
+    assoc: Evaluated
+):
+    shpe = calc_shape(mem.shape, assoc)
+    result_type = MemRef[mem.element_type, *shpe]
+    return result_type(
+        memref.CollapseShapeOp(
+            lower_single(result_type),
+            lower_single(mem),
+            assoc
+        )
+    )
 def split_static_dynamic_dims(
     shape: Iterable[Number | SupportsIndex],
 ) -> tuple[list[int], list[Index]]:

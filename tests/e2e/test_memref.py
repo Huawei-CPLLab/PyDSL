@@ -9,7 +9,7 @@ from pydsl.frontend import compile
 from pydsl.gpu import GPU_AddrSpace
 import pydsl.linalg as linalg
 import pydsl.memref as memref
-from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory
+from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory, collapse_shape
 from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
@@ -480,6 +480,14 @@ def test_zero_d():
     assert res2.shape == ()
 
 
+def test_collapse_shape():
+    @compile()
+    def my_func(a: MemRef[F32, 1, 3]) -> MemRef[F32, 3]:
+        return collapse_shape(a, [[0, 1]])
+
+    n1 = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+    assert all([a == b for a, b in zip(my_func(n1), [1.0, 2.0, 3.0])])
+
 def test_cast_basic():
     @compile()
     def f(
@@ -612,6 +620,7 @@ if __name__ == "__main__":
     run(test_link_ndarray)
     run(test_chain_link_ndarray)
     run(test_zero_d)
+    run(test_collapse_shape)
     run(test_cast_basic)
     run(test_cast_strided)
     run(test_cast_strided)
