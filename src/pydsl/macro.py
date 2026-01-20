@@ -286,24 +286,24 @@ class CallMacro(Macro):
             # Python doesn't have functor abstraction, so we'll have to do
             # functor mapping for each of the common Python data type
             match annorigin:
-                case builtins.list if (
-                    ArgCompiler.is_type_ArgCompiler(annargs[0])
+                case builtins.list if ArgCompiler.is_type_ArgCompiler(
+                    annargs[0]
                 ):
                     argcomp = ArgCompiler.from_type(annargs[0])
                     binding[name] = [
                         argcomp.compile(visitor, i) for i in binding[name]
                     ]
 
-                case builtins.tuple if (
-                    ArgCompiler.is_type_ArgCompiler(annargs[0])
+                case builtins.tuple if ArgCompiler.is_type_ArgCompiler(
+                    annargs[0]
                 ):
                     argcomp = ArgCompiler.from_type(annargs[0])
                     binding[name] = tuple([
                         argcomp.compile(visitor, i) for i in binding[name]
                     ])
 
-                case builtins.dict if (
-                    ArgCompiler.is_type_ArgCompiler(annargs[0])
+                case builtins.dict if ArgCompiler.is_type_ArgCompiler(
+                    annargs[0]
                 ):
                     argcomp = ArgCompiler.from_type(annargs[0])
                     binding[name] = {
@@ -311,8 +311,8 @@ class CallMacro(Macro):
                         for (k, v) in binding[name].items()
                     }
 
-                case builtins.set if (
-                    ArgCompiler.is_type_ArgCompiler(annargs[0])
+                case builtins.set if ArgCompiler.is_type_ArgCompiler(
+                    annargs[0]
                 ):
                     argcomp = ArgCompiler.from_type(annargs[0])
                     binding[name] = {

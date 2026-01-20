@@ -135,9 +135,9 @@ class RankedMemRefDescriptor:
         )
 
     def rank(self) -> int:
-        assert len(self.shape) == len(
-            self.strides
-        ), "rank of a RankedMemRefDescriptor is inconsistent!"
+        assert len(self.shape) == len(self.strides), (
+            "rank of a RankedMemRefDescriptor is inconsistent!"
+        )
 
         return len(self.shape)
 
@@ -546,9 +546,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
+                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
                 f"x{lower_single(self.element_type)}, got representation with shape "
-                f"{"x".join([str(sh) for sh in rep.type.shape])}"
+                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 
@@ -1028,7 +1028,7 @@ def calc_shape(memref_shape: tuple, assoc: list[list[int]]):
         res = 1
         for i in group:
             dim = memref_shape[i]
-            if (dim == DYNAMIC or res == DYNAMIC):
+            if dim == DYNAMIC or res == DYNAMIC:
                 res = DYNAMIC
             else:
                 res *= dim
@@ -1038,20 +1038,16 @@ def calc_shape(memref_shape: tuple, assoc: list[list[int]]):
 
 
 @CallMacro.generate()
-def collapse_shape(
-    visitor: ToMLIRBase,
-    mem: Compiled,
-    assoc: Evaluated
-):
+def collapse_shape(visitor: ToMLIRBase, mem: Compiled, assoc: Evaluated):
     shpe = calc_shape(mem.shape, assoc)
     result_type = MemRef[mem.element_type, *shpe]
     return result_type(
         memref.CollapseShapeOp(
-            lower_single(result_type),
-            lower_single(mem),
-            assoc
+            lower_single(result_type), lower_single(mem), assoc
         )
     )
+
+
 def split_static_dynamic_dims(
     shape: Iterable[Number | SupportsIndex],
 ) -> tuple[list[int], list[Index]]:

@@ -26,7 +26,7 @@ def gramschmidt(
     Q: MemrefF32MN,
 ) -> None:
     b: F32 = 0.0
-    temp = alloca(MemRef[F32, 1])
+    temp = alloca((1,), F32)
     for k in arange(n):
         temp[0] = b
         for i in arange(m):

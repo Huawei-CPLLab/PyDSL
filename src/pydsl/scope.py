@@ -70,8 +70,7 @@ class ScopeStack:
         """
         if self.global_scope is None:
             raise AssertionError(
-                "attempted to call globals() on a stack without a global "
-                "scope"
+                "attempted to call globals() on a stack without a global scope"
             )
         return self.global_scope.f_locals
 

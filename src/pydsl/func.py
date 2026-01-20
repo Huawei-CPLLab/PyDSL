@@ -486,9 +486,9 @@ class FunctionLike(typing.Generic[ArgsT, RetT], ABC):
         argst = tuple([p.annotation for p in lower_sig.parameters.values()])
         rett = lower_sig.return_annotation
 
-        assert (
-            rett is not Signature.empty
-        ), "signature contains Signature.empty after lowered"
+        assert rett is not Signature.empty, (
+            "signature contains Signature.empty after lowered"
+        )
 
         return cls.class_factory(argst, rett)
 
@@ -648,9 +648,9 @@ class TransformSequence(FunctionLike):
             *self._lower_typing(),
         )
 
-        assert (
-            self.visibility == Visibility.PRIVATE
-        ), "TransformSequence must be private by nature"
+        assert self.visibility == Visibility.PRIVATE, (
+            "TransformSequence must be private by nature"
+        )
 
         return val
 
@@ -821,9 +821,9 @@ class InlineFunction:
         arguments to a SubtreeOut, to be passed into __call__.
         """
         fn: InlineFunction = attr_chain[-1]
-        assert isinstance(
-            fn, InlineFunction
-        ), "InlineFunction on_Call called on not an InlineFunction"
+        assert isinstance(fn, InlineFunction), (
+            "InlineFunction on_Call called on not an InlineFunction"
+        )
 
         args = tuple(visitor.visit(arg) for arg in (*prefix_args, *node.args))
         kwargs = {kw.arg: visitor.visit(kw.value) for kw in node.keywords}

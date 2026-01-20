@@ -446,7 +446,7 @@ class CTarget(CompilationTarget):
             *transform_passes,
             "-eliminate-empty-tensors",
             "-empty-tensor-to-alloc-tensor",
-            f"-one-shot-bufferize='{" ".join(one_shot_bufferize)}'",
+            f"-one-shot-bufferize='{' '.join(one_shot_bufferize)}'",
             "-canonicalize",
             "-buffer-deallocation",
             "-convert-bufferization-to-memref",
@@ -798,7 +798,7 @@ class CTarget(CompilationTarget):
         if not len(sig.parameters) == len(args) + len(kwargs):
             raise TypeError(
                 f"{f.name} takes {len(sig.parameters)} "
-                f"argument{"s" if len(sig.parameters) > 1 else ""} "
+                f"argument{'s' if len(sig.parameters) > 1 else ''} "
                 f"but {len(args) + len(kwargs)} were given"
             )
 
@@ -1088,7 +1088,7 @@ class PolyCTarget(CTarget):
         if not len(sig.parameters) == len(args):
             raise TypeError(
                 f"{f.name} takes {len(sig.parameters)} positional "
-                f"argument{"s" if len(sig.parameters) > 1 else ""} "
+                f"argument{'s' if len(sig.parameters) > 1 else ''} "
                 f"but {len(args)} were given"
             )
 

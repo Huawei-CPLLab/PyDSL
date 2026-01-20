@@ -9,7 +9,15 @@ from pydsl.frontend import compile
 from pydsl.gpu import GPU_AddrSpace
 import pydsl.linalg as linalg
 import pydsl.memref as memref
-from pydsl.memref import alloc, alloca, dealloc, DYNAMIC, MemRef, MemRefFactory, collapse_shape
+from pydsl.memref import (
+    alloc,
+    alloca,
+    dealloc,
+    DYNAMIC,
+    MemRef,
+    MemRefFactory,
+    collapse_shape,
+)
 from pydsl.type import Bool, F32, F64, Index, SInt16, Tuple, UInt32
 from helper import compilation_failed_from, failed_from, multi_arange, run
 
@@ -182,14 +190,17 @@ def test_alloc_align():
 
 def test_alloc_bad_align():
     with compilation_failed_from(TypeError):
+
         @compile()
         def f():
             alloc((4, 6), F64, alignment="xyz")
 
     with compilation_failed_from(ValueError):
+
         @compile()
         def f():
             alloc((4, 6), F64, alignment=-123)
+
 
 def test_slice_memory_space():
     """
@@ -488,6 +499,7 @@ def test_collapse_shape():
     n1 = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
     assert all([a == b for a, b in zip(my_func(n1), [1.0, 2.0, 3.0])])
 
+
 def test_cast_basic():
     @compile()
     def f(
@@ -540,7 +552,8 @@ def test_cast_bad():
         @compile()
         def f3(m1: MemRef1):
             m1.cast(strides=(DYNAMIC, 16))
- 
+
+
 def test_copy_basic():
     @compile()
     def f(m1: MemRef[SInt16, 10, DYNAMIC], m2: MemRef[SInt16, 10, 10]):

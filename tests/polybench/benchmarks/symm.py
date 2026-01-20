@@ -25,7 +25,7 @@ def symm(
     A: MemrefMMF32,
     B: MemrefMNF32,
 ) -> None:
-    temp_arr = alloca(MemRef[F32, 1])
+    temp_arr = alloca((1,), F32)
     for i in arange(m):
         for j in arange(n):
             temp_arr[0] = F32(0.0)

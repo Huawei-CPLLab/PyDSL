@@ -408,10 +408,12 @@ class ToMLIR(ToMLIRBase):
 
                 def reducer(a, b):
                     return a.op_and(b)
+
             case ast.Or():
 
                 def reducer(a, b):
                     return a.op_or(b)
+
             case _:
                 raise SyntaxError(
                     f"{type(node.op)} is not supported as a boolean operator"
@@ -644,9 +646,9 @@ class ToMLIR(ToMLIRBase):
         iterator = node.iter
 
         # we will not accept any other way to pass in an iterator for now
-        assert (
-            type(iterator) is ast.Call
-        ), "iterator of the for loop must be a Call for now"
+        assert type(iterator) is ast.Call, (
+            "iterator of the for loop must be a Call for now"
+        )
 
         name = iterator.func.id
         iterator = self.scope_stack.resolve_as_protocol(name, HandlesFor)

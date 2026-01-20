@@ -27,16 +27,16 @@ def deriche(
     y1: Memref2DF32,
     y2: Memref2DF32,
 ) -> None:
-    xm = alloca(MemRef[F32, 1])
-    tm = alloca(MemRef[F32, 1])
-    ym1 = alloca(MemRef[F32, 1])
-    ym2 = alloca(MemRef[F32, 1])
-    xp1 = alloca(MemRef[F32, 1])
-    xp2 = alloca(MemRef[F32, 1])
-    tp1 = alloca(MemRef[F32, 1])
-    tp2 = alloca(MemRef[F32, 1])
-    yp1 = alloca(MemRef[F32, 1])
-    yp2 = alloca(MemRef[F32, 1])
+    xm = alloca((1,), F32)
+    tm = alloca((1,), F32)
+    ym1 = alloca((1,), F32)
+    ym2 = alloca((1,), F32)
+    xp1 = alloca((1,), F32)
+    xp2 = alloca((1,), F32)
+    tp1 = alloca((1,), F32)
+    tp2 = alloca((1,), F32)
+    yp1 = alloca((1,), F32)
+    yp2 = alloca((1,), F32)
 
     cst1: F32 = 1.0
     cst2: F32 = 2.0

@@ -141,9 +141,9 @@ def _float_and_int(
         elif issubclass(t, Int) and t.sign == Sign.UNSIGNED:
             return fn_unsigned, TypeFn.cast_unsigned
         else:
-            assert (
-                False
-            ), "Already checked type of t, this should be uncreachable"
+            assert False, (
+                "Already checked type of t, this should be uncreachable"
+            )
 
     return payload
 
