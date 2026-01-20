@@ -1,7 +1,7 @@
 from typing import Tuple
 
 from pydsl.frontend import compile
-from pydsl.type import F32, Index
+from pydsl.type import F32, Index, Tuple
 
 
 @compile(dump_mlir=True)

@@ -14,8 +14,8 @@ def with_recursively_example(
 ):
     for i in arange(40):
         for j in arange(40):
-            with recursively(lambda x: int_attr(x, "set", 1)):
+            with recursively(int_attr("set", 1)):
                 s[j] = (s[j] + r[i]) * A[i, j]
 
-            with recursively(lambda x: int_attr(x, "set", 2)):
+            with recursively(int_attr("set", 2)):
                 q[i] = (q[i] + p[i]) * A[i, j]

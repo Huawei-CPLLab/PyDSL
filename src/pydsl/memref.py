@@ -469,6 +469,18 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         if strides is not None:
             strides = tuple(strides)
 
+            if len(shape) != len(strides):
+                raise ValueError(
+                    f"shape and strides must have the same length, got ",
+                    f"{repr(shape)} and {repr(strides)}",
+                )
+        else:
+            if offset != 0:
+                raise ValueError(
+                    f"offset must be zero for a non-strided layout, got "
+                    f"{offset}"
+                )
+
         if not isinstance(memory_space, (MemorySpace, type(None))):
             raise TypeError(
                 f"MemRef memory_space must be an instance of MemorySpace or ",
@@ -491,14 +503,20 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
     get = class_factory
 
     @classmethod
-    def get_fully_dynamic(cls, element_type, rank: int):
+    def get_fully_dynamic(
+        cls, element_type, rank: int, memory_space: MemorySpace = None
+    ):
         """
         Quick alias for returning a MemRef type where shape,
         offset, and strides are all dynamic.
         """
         dyn_list = tuple([DYNAMIC] * rank)
         return cls.class_factory(
-            dyn_list, element_type, offset=DYNAMIC, strides=dyn_list
+            dyn_list,
+            element_type,
+            offset=DYNAMIC,
+            strides=dyn_list,
+            memory_space=memory_space,
         )
 
     def __init__(self, rep: OpView | Value) -> None:
@@ -522,9 +540,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
+                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
                 f"x{lower_single(self.element_type)}, got representation with shape "
-                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
+                f"{"x".join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 
@@ -591,7 +609,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         lo_list, size_list, step_list = slices_to_mlir_format(
             key_list, self.runtime_shape
         )
-        result_type = self.get_fully_dynamic(self.element_type, dim)
+        result_type = self.get_fully_dynamic(
+            self.element_type, dim, self.memory_space
+        )
         dynamic_i64_attr = DenseI64ArrayAttr.get([DYNAMIC] * dim)
         rep = memref.SubViewOp(
             result_type.lower_class()[0],
@@ -644,11 +664,12 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
 
         if len(key_list) != dim:
             raise IndexError(
-                f"number of indices must be the same as the rank of a MemRef when storing: `"
-                f"rank is {dim}, but number of indices is {len(key_list)}"
+                f"number of indices must be the same as the rank of a MemRef "
+                f"when storing: rank is {dim}, but number of indices is "
+                f"{len(key_list)}"
             )
 
-        raise TypeError("cannot store to a slice of a MemRef")
+        raise TypeError("cannot store to a slice of a MemRef, use memref.copy")
 
     @classmethod
     def __class_getitem__(cls, args: tuple):
@@ -811,6 +832,7 @@ def _alloc_generic(
     shape: Compiled,
     dtype: Evaluated,
     memory_space: MemorySpace | None = None,
+    alignment: int | None = None,
 ) -> SubtreeOut:
     """
     Does the logic required for alloc/alloca. It was silly having two functions
@@ -832,6 +854,14 @@ def _alloc_generic(
             f"shape should be a Tuple, got {type(shape).__qualname__}"
         )
 
+    if not isinstance(alignment, (int, type(None))):
+        raise TypeError(
+            f"alignment must be int or None, got {type(alignment)}"
+        )
+
+    if alignment is not None and alignment <= 0:
+        raise ValueError(f"alignment must be positive, got {alignment}")
+
     shape = shape.as_iterable(visitor)
     static_shape, dynamic_sizes = split_static_dynamic_dims(shape)
 
@@ -840,7 +870,12 @@ def _alloc_generic(
     )
 
     return m_type(
-        alloc_func(lower_single(m_type), lower_flatten(dynamic_sizes), [])
+        alloc_func(
+            lower_single(m_type),
+            lower_flatten(dynamic_sizes),
+            symbol_operands=[],
+            alignment=alignment,
+        )
     )
 
 
@@ -851,8 +886,11 @@ def alloca(
     dtype: Evaluated,
     *,
     memory_space: Evaluated = None,
+    alignment: Evaluated = None,
 ) -> SubtreeOut:
-    return _alloc_generic(visitor, memref.alloca, shape, dtype, memory_space)
+    return _alloc_generic(
+        visitor, memref.alloca, shape, dtype, memory_space, alignment
+    )
 
 
 @CallMacro.generate()
@@ -862,8 +900,11 @@ def alloc(
     dtype: Evaluated,
     *,
     memory_space: Evaluated = None,
+    alignment: Evaluated = None,
 ) -> SubtreeOut:
-    return _alloc_generic(visitor, memref.alloc, shape, dtype, memory_space)
+    return _alloc_generic(
+        visitor, memref.alloc, shape, dtype, memory_space, alignment
+    )
 
 
 @CallMacro.generate()
@@ -874,6 +915,35 @@ def dealloc(visitor: ToMLIRBase, mem: Compiled) -> None:
         )
 
     return memref.dealloc(lower_single(mem))
+
+
+@CallMacro.generate()
+def copy(visitor: ToMLIRBase, src: Compiled, dst: Compiled) -> None:
+    """
+    Copies data from src to dst. src and dst must have the same shape at
+    runtime, otherwise the behaviour is undefined. src and dst do not need to
+    have the same layout.
+    """
+
+    if not (isinstance(src, MemRef) and isinstance(dst, MemRef)):
+        raise ValueError(
+            f"operands of memref.copy must be MemRefs, got {type(src)} and "
+            f"{type(dst)}"
+        )
+
+    if not are_shapes_compatible(src.shape, dst.shape):
+        raise ValueError(
+            f"operands of memref.copy must have the same shape, got "
+            f"{src.shape} and {dst.shape}"
+        )
+
+    if src.element_type != dst.element_type:
+        raise ValueError(
+            f"operands of memref.copy must have the same element type, got "
+            f"{src.element_type} and {dst.element_type}"
+        )
+
+    memref.copy(lower_single(src), lower_single(dst))
 
 
 def slices_to_mlir_format(

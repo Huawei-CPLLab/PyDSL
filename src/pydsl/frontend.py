@@ -445,7 +445,7 @@ class CTarget(CompilationTarget):
             *transform_passes,
             "-eliminate-empty-tensors",
             "-empty-tensor-to-alloc-tensor",
-            f"-one-shot-bufferize='{' '.join(one_shot_bufferize)}'",
+            f"-one-shot-bufferize='{" ".join(one_shot_bufferize)}'",
             "-canonicalize",
             "-buffer-deallocation",
             "-convert-bufferization-to-memref",
@@ -477,18 +477,15 @@ class CTarget(CompilationTarget):
     def log_command_result(self, cmds, result) -> None:
         if result.stderr:
             warning(
-                f"""The following error is caused by this command:
-
+                f"""The following warning/error is caused by this command:
 {self.cmds_to_str(cmds)}
-
-Depending on the severity of the message,
-compilation may fail entirely.
 {"*" * 20}
-{result.stderr.decode("utf-8")}{"*" * 20}"""
+{result.stderr.decode("utf-8")}{"*" * 20}
+"""
             )
         else:
             info(
-                f"""The following command was ran without issue
+                f"""The following command ran without issues:
 {self.cmds_to_str(cmds)}
 """
             )
@@ -496,12 +493,12 @@ compilation may fail entirely.
     def run_and_get_output(self, cmds):
         result = subprocess.run(
             self.cmds_to_str(cmds),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             shell=True,
             check=False,
         )
         self.log_command_result(cmds, result)
+        result.check_returncode()
         return result.stdout.decode("utf-8") if result.stdout else None
 
     def run_and_pipe_output(self, cmds, stdout: IO):
@@ -513,6 +510,7 @@ compilation may fail entirely.
             check=False,
         )
         self.log_command_result(cmds, result)
+        result.check_returncode()
         return result.stdout.decode("utf-8") if result.stdout else None
 
     def check_cmd(self, cmd: str) -> None:
@@ -777,7 +775,7 @@ compilation may fail entirely.
         if not len(sig.parameters) == len(args):
             raise TypeError(
                 f"{f.name} takes {len(sig.parameters)} positional "
-                f"argument{'s' if len(sig.parameters) > 1 else ''} "
+                f"argument{"s" if len(sig.parameters) > 1 else ""} "
                 f"but {len(args)} were given"
             )
 
@@ -1063,7 +1061,7 @@ class PolyCTarget(CTarget):
         if not len(sig.parameters) == len(args):
             raise TypeError(
                 f"{f.name} takes {len(sig.parameters)} positional "
-                f"argument{'s' if len(sig.parameters) > 1 else ''} "
+                f"argument{"s" if len(sig.parameters) > 1 else ""} "
                 f"but {len(args)} were given"
             )
 
@@ -1309,11 +1307,16 @@ class CompiledObject(typing.Generic[ObjectType], ABC):
     def filepath(self) -> Path:
         return Path(inspect.getsourcefile(self._o))
 
+    @property
+    def lineno(self) -> int:
+        return inspect.getsourcelines(self._o)[1]
+
     @cache
     def get_src(self) -> Source:
         return Source.init_embeded(
             src_str=self.src_str,
             filepath=self.filepath,
+            lineno=self.lineno,
         )
 
     def emit_mlir(self) -> str:
@@ -1433,6 +1436,7 @@ class CompiledClass(CompiledObject[type]):
             src_str=self.src_str,
             src_ast=self.src_ast,
             filepath=self.filepath,
+            lineno=self.lineno,
         )
 
     def finalize(self) -> None:

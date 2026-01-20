@@ -1,6 +1,12 @@
 import numpy as np
 
-from pydsl.transform import tile, parallel, tag, match_tag as match
+from pydsl.transform import (
+    decorate_next,
+    tile,
+    parallel,
+    tag,
+    match_tag as match,
+)
 from pydsl.type import Index, AnyOp, F32
 from pydsl.memref import MemRef
 from pydsl.frontend import PolyCTarget
@@ -45,8 +51,8 @@ autotune_values *= Setting.target_class([PolyCTarget])
 @autotune(autotune_values)
 def heat_fuse_tile(n: Index, A: MemRef[F32, N, N]):
     for _ in arange(100):
-        """@tag("loop_outter")"""
+        decorate_next(tag("loop_outter"))
         for i in arange(n):
-            """@tag("loop_inner")"""
+            decorate_next(tag("loop_inner"))
             for j in arange(n):
                 A[i, j] = (-1.5) * A[i, j] * A[i, j] + (2.5) * A[i, j] + 1

@@ -116,9 +116,9 @@ class Tensor(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
+                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
                 f"x{lower_single(self.element_type)}, got OpView with shape "
-                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
+                f"{"x".join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 
