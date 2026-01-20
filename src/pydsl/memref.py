@@ -135,9 +135,9 @@ class RankedMemRefDescriptor:
         )
 
     def rank(self) -> int:
-        assert len(self.shape) == len(
-            self.strides
-        ), "rank of a RankedMemRefDescriptor is inconsistent!"
+        assert len(self.shape) == len(self.strides), (
+            "rank of a RankedMemRefDescriptor is inconsistent!"
+        )
 
         return len(self.shape)
 
@@ -546,9 +546,9 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
             lower_single(self.element_type) == rep.type.element_type,
         ]):
             raise TypeError(
-                f"expected shape {"x".join([str(sh) for sh in self.shape])}"
+                f"expected shape {'x'.join([str(sh) for sh in self.shape])}"
                 f"x{lower_single(self.element_type)}, got representation with shape "
-                f"{"x".join([str(sh) for sh in rep.type.shape])}"
+                f"{'x'.join([str(sh) for sh in rep.type.shape])}"
                 f"x{rep.type.element_type}"
             )
 

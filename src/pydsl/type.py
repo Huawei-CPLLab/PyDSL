@@ -852,9 +852,9 @@ class F64(Float, width=64, mlir_type=F64Type):
 # the target the current machine this runs on
 def get_index_width() -> int:
     s = log2(sys.maxsize + 1) + 1
-    assert (
-        s.is_integer()
-    ), "the compiler cannot determine the index size of the current "
+    assert s.is_integer(), (
+        "the compiler cannot determine the index size of the current "
+    )
     f"system. sys.maxsize yielded {sys.maxsize}"
 
     return int(s)

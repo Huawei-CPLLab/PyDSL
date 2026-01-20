@@ -18,9 +18,9 @@ def failed_from(error_type: type[Exception]):
     try:
         yield
     except Exception as e:
-        assert isinstance(
-            e, error_type
-        ), f"expected {error_type}, but instead got {type(e)}"
+        assert isinstance(e, error_type), (
+            f"expected {error_type}, but instead got {type(e)}"
+        )
     else:
         assert False, f"expected {error_type}, but no error was raised"
 
@@ -30,9 +30,9 @@ def compilation_failed_from(error_type: type[Exception]):
     try:
         yield
     except Exception as e:
-        assert isinstance(
-            e, CompilationError
-        ), f"expected CompilationError, but instead got {type(e)}"
+        assert isinstance(e, CompilationError), (
+            f"expected CompilationError, but instead got {type(e)}"
+        )
 
         assert isinstance(e.exception, error_type), (
             f"CompilationError is caused by {type(e.exception)}: "
