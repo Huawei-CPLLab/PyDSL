@@ -1,3 +1,5 @@
+# ruff: noqa
+
 from pydsl.affine import affine_range as arange
 from pydsl.frontend import CTarget, compile
 from pydsl.memref import DYNAMIC, MemRef

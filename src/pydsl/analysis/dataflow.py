@@ -79,12 +79,12 @@ class GenKill(Generic[N, V]):
         self.kill.update({node: kills})
 
     def gens(self, node: N) -> set[V]:
-        if not (node in self.gen):
+        if node not in self.gen:
             return set()
         return self.gen[node]
 
     def kills(self, node: N) -> set[V]:
-        if not (node in self.kill):
+        if node not in self.kill:
             return set()
         return self.kill[node]
 
@@ -324,7 +324,7 @@ class ToVariableGenKill(NodeVisitor):
         self.genkill = GenKill()
 
     def visit(self, node: AST) -> Any:
-        res = super().visit(node)
+        super().visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> Any:
         pass

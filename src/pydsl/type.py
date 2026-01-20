@@ -32,7 +32,6 @@ from mlir.ir import (
 
 from pydsl.macro import CallMacro, MethodType, Uncompiled
 from pydsl.protocols import ArgContainer, canonicalize_args, ToMLIRBase
-from pydsl.protocols import ArgContainer, canonicalize_args, ToMLIRBase
 
 if TYPE_CHECKING:
     # This is for imports for type hinting purposes only and which can result

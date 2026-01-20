@@ -2,7 +2,6 @@ import numpy as np
 
 from pydsl.affine import (
     affine_range as arange,
-    integer_set as iset,
     symbol as S,
     dimension as D,
 )
