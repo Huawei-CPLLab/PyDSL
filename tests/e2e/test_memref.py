@@ -182,19 +182,14 @@ def test_alloc_align():
 
 def test_alloc_bad_align():
     with compilation_failed_from(TypeError):
-
         @compile()
         def f():
             alloc((4, 6), F64, alignment="xyz")
 
     with compilation_failed_from(ValueError):
-
         @compile()
         def f():
             alloc((4, 6), F64, alignment=-123)
-
-    mlir = f.emit_mlir()
-    assert r"memref.dealloc" in mlir
 
 def test_slice_memory_space():
     """
