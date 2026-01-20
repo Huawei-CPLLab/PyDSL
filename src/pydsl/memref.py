@@ -21,7 +21,7 @@ from mlir.ir import (
 )
 
 from pydsl.affine import AffineContext, AffineMapExpr, AffineMapExprWalk
-from pydsl.macro import CallMacro, Compiled, Evaluated
+from pydsl.macro import CallMacro, Compiled, Evaluated, MethodType
 from pydsl.protocols import (
     ArgContainer,
     canonicalize_args,
@@ -179,6 +179,18 @@ def are_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> bool:
     return len(arr1) == len(arr2) and all(
         a == b or a == DYNAMIC or b == DYNAMIC for a, b in zip(arr1, arr2)
     )
+
+
+def assert_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> None:
+    """
+    Checks that non-dynamic dimensions of arr1 and arr2 match, throws a
+    ValueError if not.
+    """
+    if not are_shapes_compatible(arr1, arr2):
+        raise ValueError(
+            f"incompatible shapes: {repr(arr1)} and {repr(arr2)}, non-dynamic "
+            f"dimensions must be equal"
+        )
 
 
 class UsesRMRD:
@@ -679,6 +691,86 @@ class MemRef(typing.Generic[DType, *Shape], UsesRMRD):
         # Equivalent to cls.__class_getitem__(args)
         return cls[args]
 
+    @CallMacro.generate(method_type=MethodType.INSTANCE)
+    def cast(
+        visitor: ToMLIRBase,
+        self: typing.Self,
+        shape: Evaluated = None,
+        *,
+        offset: Evaluated = None,
+        strides: Evaluated = (-1,),
+    ) -> typing.Self:
+        """
+        Converts a memref from one type to an equivalent type with a compatible
+        shape. The source and destination types are compatible if all of the
+        following are true:
+        - Both are ranked memref types with the same element type, address
+        space, and rank.
+        - Both have the same layout or both have compatible strided layouts.
+        - The individual sizes (resp. offset and strides in the case of strided
+        memrefs) may convert constant dimensions to dynamic dimensions and
+        vice-versa.
+
+        If the cast converts any dimensions from an unknown to a known size,
+        then it acts as an assertion that fails at runtime if the dynamic
+        dimensions disagree with the resultant destination size (i.e. it is
+        illegal to do a conversion that causes a mismatch, and it would invoke
+        undefined behaviour).
+
+        Note: a new memref with the new type is returned, the type of the
+        original memref is not modified.
+
+        Example:
+        ```
+        def f(m1: MemRef[F32, DYNAMIC, 32, 5]) -> MemRef[F32, 64, 32, DYNAMIC]:
+            # Only valid if the first dimension of m1 is always 64
+            m2 = m1.cast((64, 32, DYNAMIC))
+            return m2
+        ```
+        """
+        # NOTE: default value of strides is (-1,) because None is already used
+        # to represent default layout... This is definitely not a great
+        # solution, but it's unclear how to do this better.
+
+        shape = tuple(shape) if shape is not None else self.shape
+        offset = int(offset) if offset is not None else self.offset
+        strides = (
+            None
+            if strides is None
+            else self.strides
+            if strides == (-1,)
+            else tuple(strides)
+        )
+
+        if not all(isinstance(x, int) for x in shape):
+            raise ValueError(
+                f"shape should be a tuple of integers known at compile time ",
+                f"got {repr(shape)}",
+            )
+
+        if not (strides is None or all(isinstance(x, int) for x in strides)):
+            raise ValueError(
+                f"strides should be a tuple of integers known at compile ",
+                f"time, got {repr(strides)}",
+            )
+
+        assert_shapes_compatible(self.shape, shape)
+        assert_shapes_compatible([self.offset], [offset])
+
+        # TODO: also do a type check if one of the MemRefs is default layout.
+        # This is a reasonably complicated check, and even MLIR doesn't do it
+        # properly. E.g. mlir-opt allows
+        # `memref<3x4xf64, strided<[8, 1], offset: ?>> to memref<?x?xf64>`
+        # to compile, even though it is impossible for this to be correct.
+        if self.strides is not None and strides is not None:
+            assert_shapes_compatible(self.strides, strides)
+
+        result_type = self.class_factory(
+            shape, self.element_type, offset=offset, strides=strides
+        )
+        rep = memref.cast(lower_single(result_type), lower_single(self))
+        return result_type(rep)
+
     def lower(self) -> tuple[Value]:
         return (self.value,)
 
@@ -739,8 +831,8 @@ def _alloc_generic(
     alloc_func: Callable,
     shape: Compiled,
     dtype: Evaluated,
-    memory_space: MemorySpace | None,
-    alignment: int | None,
+    memory_space: MemorySpace | None = None,
+    alignment: int | None = None,
 ) -> SubtreeOut:
     """
     Does the logic required for alloc/alloca. It was silly having two functions

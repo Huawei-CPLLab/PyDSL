@@ -182,17 +182,14 @@ def test_alloc_align():
 
 def test_alloc_bad_align():
     with compilation_failed_from(TypeError):
-
         @compile()
         def f():
             alloc((4, 6), F64, alignment="xyz")
 
     with compilation_failed_from(ValueError):
-
         @compile()
         def f():
             alloc((4, 6), F64, alignment=-123)
-
 
 def test_slice_memory_space():
     """
@@ -483,6 +480,59 @@ def test_zero_d():
     assert res2.shape == ()
 
 
+def test_cast_basic():
+    @compile()
+    def f(
+        m1: MemRef[F32, 10, DYNAMIC, 30],
+    ) -> MemRef[F32, DYNAMIC, 20, DYNAMIC]:
+        m1 = m1.cast((DYNAMIC, 20, 30), strides=(600, 30, 1))
+        m1 = m1.cast((DYNAMIC, DYNAMIC, DYNAMIC))
+        m1 = m1.cast((10, 20, 30), strides=None)
+        m1 = m1.cast((DYNAMIC, 20, DYNAMIC))
+        return m1
+
+    n1 = multi_arange((10, 20, 30), dtype=np.float32)
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_strided():
+    MemRef1 = MemRef.get((8, DYNAMIC), SInt16, offset=10, strides=(1, 8))
+    MemRef2 = MemRef.get((8, 4), SInt16, offset=DYNAMIC, strides=(DYNAMIC, 8))
+
+    @compile()
+    def f(m1: MemRef1) -> MemRef2:
+        m1.cast(strides=(1, DYNAMIC))
+        m1 = m1.cast((8, 4), offset=DYNAMIC, strides=(DYNAMIC, 8))
+        return m1
+
+    i16_sz = np.int16().nbytes
+    n1 = multi_arange((8, 4), np.int16)
+    n1 = as_strided(n1, shape=(8, 4), strides=(i16_sz, 8 * i16_sz))
+    cor_res = n1.copy()
+    assert (f(n1) == cor_res).all()
+
+
+def test_cast_bad():
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f1(m1: MemRef[UInt32, 5, 8]):
+            m1.cast((5, 8, 7))
+
+    with compilation_failed_from(ValueError):
+
+        @compile()
+        def f2(m1: MemRef[F64, DYNAMIC, 4]):
+            m1.cast((DYNAMIC, 5))
+
+    with compilation_failed_from(ValueError):
+        MemRef1 = MemRef.get((8, DYNAMIC), F32, offset=10, strides=(1, 8))
+
+        @compile()
+        def f3(m1: MemRef1):
+            m1.cast(strides=(DYNAMIC, 16))
+ 
 def test_copy_basic():
     @compile()
     def f(m1: MemRef[SInt16, 10, DYNAMIC], m2: MemRef[SInt16, 10, 10]):
@@ -562,6 +612,10 @@ if __name__ == "__main__":
     run(test_link_ndarray)
     run(test_chain_link_ndarray)
     run(test_zero_d)
+    run(test_cast_basic)
+    run(test_cast_strided)
+    run(test_cast_strided)
+    run(test_cast_bad)
     run(test_copy_basic)
     run(test_copy_overlap)
     run(test_copy_strided)
