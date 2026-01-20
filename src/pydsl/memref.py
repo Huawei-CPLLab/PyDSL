@@ -171,13 +171,19 @@ class RankedMemRefDescriptor:
         )
 
 
+def are_dims_compatible(*dims):
+    """Return True if all dimensions are compatible, considering DYNAMIC."""
+    concrete_dims = {d for d in dims if d != DYNAMIC}
+    return len(concrete_dims) <= 1
+
+
 def are_shapes_compatible(arr1: Iterable[int], arr2: Iterable[int]) -> bool:
     """
     Returns whether arr1 and arr2 have the same elements, excluding positions
     where at least one of the values is DYNAMIC.
     """
     return len(arr1) == len(arr2) and all(
-        a == b or a == DYNAMIC or b == DYNAMIC for a, b in zip(arr1, arr2)
+        are_dims_compatible(a, b) for a, b in zip(arr1, arr2)
     )
 
 
