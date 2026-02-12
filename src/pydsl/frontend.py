@@ -34,7 +34,6 @@ from pydsl.type import Tuple
 
 import numpy as np
 
-from pydsl.compiler import CompilationError, ToMLIR
 from pydsl.memref import DYNAMIC, MemRef
 from pydsl.protocols import ArgContainer
 

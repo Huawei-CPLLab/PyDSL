@@ -27,8 +27,8 @@ def test_multiple_recursively_tag():
     @compile(globals())
     def identity():
         with recursively(tag("mytag")):
-            a: F32 = 0.0
-            b: F32 = 1.0
+            a: F32 = 0.0  # noqa: F841
+            b: F32 = 1.0  # noqa: F841
 
     mlir = identity.emit_mlir()
 
@@ -43,8 +43,8 @@ def test_multiple_recursively_int_attr():
     @compile(globals())
     def identity():
         with recursively(int_attr("myintattr", 3)):
-            a: F32 = 0.0
-            b: F32 = 1.0
+            a: F32 = 0.0  # noqa: F841
+            b: F32 = 1.0  # noqa: F841
 
     mlir = identity.emit_mlir()
 

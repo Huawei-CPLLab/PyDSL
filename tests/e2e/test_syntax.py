@@ -10,8 +10,8 @@ from helper import compilation_failed_from, run
 def test_annassign():
     @compile(globals())
     def _():
-        a: UInt16 = 2
-        b: SInt16 = -2
+        a: UInt16 = 2  # noqa: F841
+        b: SInt16 = -2  # noqa: F841
 
 
 def test_illegal_annassign():
@@ -19,7 +19,7 @@ def test_illegal_annassign():
 
         @compile(globals())
         def _():
-            a: UInt16 = -2
+            a: UInt16 = -2  # noqa: F841
 
 
 def test_non_literal_annassign():
