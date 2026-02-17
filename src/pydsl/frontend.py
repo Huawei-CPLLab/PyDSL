@@ -562,7 +562,7 @@ class CTarget(CompilationTarget):
             "-o",
             file.name,
             "-L$PYDSL_LLVM/lib",
-            "-Wl,-rpath=$PYDSL_LLVM/lib",
+            "-Wl,-rpath,$PYDSL_LLVM/lib",
             "-lmlir_c_runner_utils",
         ])
 
