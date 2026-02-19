@@ -11,7 +11,7 @@ from pydsl.transform import (
 )
 from pydsl.type import Index, AnyOp, F32
 from pydsl.memref import MemRef
-from pydsl.frontend import PolyCTarget
+from pydsl.poly_target import PolyCTarget
 from pydsl.affine import affine_range as arange
 
 from pydsl.autotune import autotune, Var, Setting, TestingData

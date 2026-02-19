@@ -4,7 +4,8 @@ import numpy as np
 
 from pydsl.type import Index, F16, F32, F64, AnyOp
 from pydsl.memref import MemRefFactory
-from pydsl.frontend import CTarget, PolyCTarget
+from pydsl.frontend import CTarget
+from pydsl.poly_target import PolyCTarget
 from pydsl.affine import affine_range as arange
 from pydsl.transform import decorate_next, tile, tag, match_tag as match
 
