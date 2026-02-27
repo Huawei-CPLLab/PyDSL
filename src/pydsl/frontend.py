@@ -846,6 +846,7 @@ class CTarget(CompilationTarget):
             Dialect.from_name("transform"),
             Dialect.from_name("transform.loop"),
             Dialect.from_name("transform.structured"),
+            Dialect.from_name("vector"),
         }
 
 

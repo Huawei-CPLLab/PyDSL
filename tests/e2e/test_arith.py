@@ -435,6 +435,43 @@ def test_Number_bool():
     f()
 
 
+from pydsl.vector import Vector
+import pydsl.arith as arith
+
+Vector2D = Vector.get((2, 2), UInt64)
+
+
+def test_UInt64_vadd():
+    @compile(globals())
+    def f(arg0: Vector2D, arg1: Vector2D) -> Vector2D:
+        res = arith.vadd(arg0, arg1)
+        return res
+
+    mlir = f.emit_mlir()
+    assert r"arith.addi" in mlir
+
+
+def test_UInt64_vmul():
+    @compile(globals())
+    def f(arg0: Vector2D, arg1: Vector2D) -> Vector2D:
+        res = arith.vmul(arg0, arg1)
+        return res
+
+    mlir = f.emit_mlir()
+    assert r"arith.muli" in mlir
+
+
+def test_trunc_F64_to_F32():
+    @compile(globals())
+    def trunc(arg: F64) -> F32:
+        return arith.trunc(arg, F32)
+
+    for i in f32_edges:
+        f32 = trunc(i)
+        assert isinstance(f32, float)
+        assert f32_isclose(i, f32)
+
+
 if __name__ == "__main__":
     run(test_val_range_Int8)
     run(test_ctype_range_UInt8)
@@ -471,3 +508,6 @@ if __name__ == "__main__":
     run(test_SInt_unary)
     run(test_Number_unary)
     run(test_Number_bool)
+    run(test_UInt64_vadd)
+    run(test_UInt64_vmul)
+    run(test_trunc_F64_to_F32)
