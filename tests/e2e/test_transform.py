@@ -128,8 +128,22 @@ def test_outline_loop():
     )
 
 
+def test_tag_with_string_value():
+    @compile(globals())
+    @tag("mytag", "0")
+    def f():
+        a: F32 = 0.0
+        b: F32 = 1.0
+
+    mlir = f.emit_mlir()
+
+    # No runtime check: testing function of tag only
+    assert r"mytag = 0" in mlir
+
+
 if __name__ == "__main__":
     run(test_multiple_recursively_tag)
     run(test_multiple_recursively_int_attr)
     run(test_cse_then_coalesce)
     run(test_outline_loop)
+    run(test_tag_with_string_value)
