@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from mlir.dialects import transform
 from mlir.dialects.transform import loop, structured
-from mlir.ir import IndexType, IntegerAttr, OpView, UnitAttr
+from mlir.ir import IndexType, IntegerAttr, OpView, UnitAttr, Attribute
 
 from pydsl.macro import CallMacro, Compiled, Evaluated, Uncompiled
 from pydsl.protocols import SubtreeOut, ToMLIRBase, lower_single
@@ -98,17 +98,29 @@ def attr_setter(attr_name: str, value):
 
 
 @CallMacro.generate()
-def tag(visitor: ToMLIRBase, attr_name: Evaluated[str]) -> Evaluated[Callable]:
+def tag(
+    visitor: ToMLIRBase,
+    attr_name: Evaluated[str],
+    attr_value: Evaluated[str | None] = None,
+) -> Evaluated[Callable]:
     """
-    Tags the `mlir` MLIR operation with a MLIR unit attribute with name
+    Tags the `mlir` MLIR operation with a MLIR attribute with name
     `attr_name`.
 
     Arguments:
     - `mlir`: AST. The AST node whose equivalent MLIR Operator is to be tagged
-      with the unit attribute
-    - `attr_name`: str. The name of the unit attribute
+      with the attribute
+    - `attr_name`: str. The name of the attribute
+    - `attr_value`: str. An optional argument that will convert the attribute
+    from a unit attribute to a key/value attribute pair.
     """
-    return attr_setter(attr_name, UnitAttr.get())
+    if type(attr_name) is not str:
+        raise TypeError("Attribute name is not a string")
+
+    if attr_value is None:
+        return attr_setter(attr_name, UnitAttr.get())
+    else:
+        return attr_setter(attr_name, Attribute.parse(attr_value))
 
 
 @CallMacro.generate()
