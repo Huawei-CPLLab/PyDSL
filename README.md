@@ -6,6 +6,10 @@ This project aims to provide an interface between Python and MLIR with the follo
 
 Simplicity and being Pythonic are conflicting goals. In order to maintain simplicity, we have to aim for a very strict subset of Python that benefits domain-specific applications such as affine programming with little if-else statements. As such, certain programs will be easy to write while others will be nearly infeasible.
 
+PyDSL's CPU backend has support for [Polyhedral Scheduling Optimization](#polymorphous) that leverages Affine Analysis.
+
+PyDSL is also designed with [AscendNPU-IR](https://gitcode.com/Ascend/AscendNPU-IR) in mind, and native support for AscendNPU-IR as a backend will be coming to PyDSL very soon
+
 # Presentations
 PyDSL has been presented at the following venues:
 
