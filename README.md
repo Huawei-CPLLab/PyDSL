@@ -16,8 +16,8 @@ PyDSL has been presented at the following venues:
 - [Open MLIR Meeting](https://mlir.llvm.org/talks/) on December 21st, 2023: 📊 [**Slides**](https://mlir.llvm.org/OpenMeetings/2023-12-21-PyDSL.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=nmtHeRkl850)
 - [2024 LLVM Developers' Meeting](https://llvm.swoogo.com/2024devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202024.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=iYLxgTRe8TU)
 - 2025 January PyDSL 2.0 Announcement: 🎞️[**Video**](https://youtu.be/6N7tJWSO_v4)
-- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202025.pdf)
-- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg) PolyTool Presentation (PyDSL usecase): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PolyTool%20-%20LLVM%20Conference%202025.pdf)
+- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PyDSL%20-%20LLVM%20Conference%202025.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=7_dB2QolUkc)
+- [2025 LLVM Developers' Meeting](https://llvm.swoogo.com/2025devmtg) PolyTool Presentation (PyDSL usecase): 📊 [**Slides**](https://github.com/Huawei-CPLLab/PyDSL/blob/main/PolyTool%20-%20LLVM%20Conference%202025.pdf) | 🎞️ [**Video**](https://www.youtube.com/watch?v=LXQqdqJGXWU)
 # Discord Server
 If you have any questions or would like to join the community, we have a Discord Server!
 
